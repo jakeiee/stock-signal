@@ -44,7 +44,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"📊 持仓分析报告已生成\\n✅ 执行成功\\n🔗 https://github.com/jakeiee/stock-signal/actions\"}}"
+            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"📊 持仓分析报告已生成\\n✅ 执行成功\\n📥 报告下载: https://github.com/jakeiee/stock-signal/actions/runs/${{ github.run_id }}/artifacts\"}}"
 
       - name: 飞书失败通知
         if: failure()
