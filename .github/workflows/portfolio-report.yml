@@ -1,0 +1,44 @@
+name: 持仓分析报告
+
+on:
+  schedule:
+    - cron: '30 1 * * 1-5'    # 工作日北京时间 09:30 (UTC+8)
+  workflow_dispatch:             # 支持手动触发
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖（清华镜像源）
+        run: |
+          pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+          pip install xalpha pandas numpy requests
+
+      - name: 执行持仓分析（带重试机制）
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: python market_monitor/report/portfolio_analyzer.py
+
+      - name: 上传报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-report-${{ github.run_number }}
+          path: portfolio_report_*.md
+          retention-days: 30
+
+      - name: 执行完成
+        if: success()
+        run: echo "✅ 持仓报告生成成功"
