@@ -39,6 +39,26 @@ jobs:
           path: portfolio_report_*.md
           retention-days: 30
 
-      - name: 执行完成
+      - name: 飞书通知
         if: success()
-        run: echo "✅ 持仓报告生成成功"
+        run: |
+          curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "msg_type": "text",
+              "content": {
+                "text": "📊 持仓分析报告已生成\n✅ 执行成功\n⏰ 时间: $(date +"%Y-%m-%d %H:%M:%S")\n🔗 查看: https://github.com/jakeiee/stock-signal/actions"
+              }
+            }'
+
+      - name: 飞书失败通知
+        if: failure()
+        run: |
+          curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "msg_type": "text",
+              "content": {
+                "text": "⚠️ 持仓分析报告生成失败\n❌ 请检查 GitHub Actions 日志\n🔗 查看: https://github.com/jakeiee/stock-signal/actions"
+              }
+            }'

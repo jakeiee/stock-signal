@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List
 
 import pandas as pd
@@ -393,7 +393,8 @@ INDICATOR_GUIDE = """
 
 def generate_md_report(results: List[Dict], output_path: str = None) -> str:
     """生成 Markdown 报告"""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
     total = len(results)
     avg_score = sum(r.get("pattern_score", 0) for r in results) / total if total else 0
 
@@ -784,7 +785,8 @@ def main():
         return
 
     # 生成报告
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    beijing_tz = timezone(timedelta(hours=8))
+    date_str = datetime.now(beijing_tz).strftime("%Y-%m-%d")
     output_path = f"./portfolio_report_{date_str}.md"
 
     md = generate_md_report(results, output_path)
