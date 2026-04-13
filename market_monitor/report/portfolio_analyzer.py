@@ -792,6 +792,84 @@ def main():
     md = generate_md_report(results, output_path)
     print(f"\n📄 报告已保存: {output_path}")
 
+    # 发送到飞书
+    send_to_feishu(output_path)
+
+
+def send_to_feishu(md_file_path: str):
+    """发送 MD 报告到飞书"""
+    try:
+        import requests
+        from ..config import FEISHU_WEBHOOK
+
+        if not FEISHU_WEBHOOK:
+            print("⚠ 飞书 Webhook 未配置，跳过发送")
+            return False
+
+        # 读取 MD 文件
+        with open(md_file_path, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+
+        # 限制内容长度（飞书卡片单条消息有限制）
+        max_len = 4000
+        if len(md_content) > max_len:
+            md_content = md_content[:max_len] + "\n\n...（内容过长，已截断）"
+
+        # 构建飞书卡片消息
+        payload = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {
+                    "wide_screen_mode": True
+                },
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": "📊 持仓分析报告"
+                    },
+                    "template": "blue"
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": md_content
+                        }
+                    },
+                    {
+                        "tag": "note",
+                        "elements": [
+                            {
+                                "tag": "plain_text",
+                                "content": f"生成时间: {datetime.now(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        # 发送请求
+        response = requests.post(
+            FEISHU_WEBHOOK,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30
+        )
+
+        result = response.json()
+        if result.get('code') == 0:
+            print("✅ 报告已发送到飞书")
+            return True
+        else:
+            print(f"⚠ 飞书发送失败: {result}")
+            return False
+
+    except Exception as e:
+        print(f"⚠ 发送到飞书时出错: {e}")
+        return False
+
 
 if __name__ == "__main__":
     main()
