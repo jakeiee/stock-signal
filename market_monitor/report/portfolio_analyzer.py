@@ -842,7 +842,7 @@ def send_to_feishu(md_file_path: str):
                         "elements": [
                             {
                                 "tag": "plain_text",
-                                "content": f"生成时间: {datetime.now(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
+                                "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
                             }
                         ]
                     }
