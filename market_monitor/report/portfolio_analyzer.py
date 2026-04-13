@@ -800,7 +800,7 @@ def send_to_feishu(md_file_path: str):
     """发送 MD 报告到飞书"""
     try:
         import requests
-        from ..config import FEISHU_WEBHOOK
+        from market_monitor.config import FEISHU_WEBHOOK
 
         if not FEISHU_WEBHOOK:
             print("⚠ 飞书 Webhook 未配置，跳过发送")
