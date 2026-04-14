@@ -664,6 +664,7 @@ def _glb_kpi_block(glb_dim: dict) -> tuple:
     def _valuation_icon(pct):
         """根据10年百分位返回估值图标和文字"""
         if pct is None: return "", ""
+        if not isinstance(pct, (int, float)): return "", ""
         if pct >= 81:    return "🔴", "昂贵"
         if pct >= 61:   return "🟠", "高估"
         if pct >= 41:   return "🟡", "合理"

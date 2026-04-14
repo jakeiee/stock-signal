@@ -8,7 +8,10 @@ import os
 # ============ 飞书配置 ============
 
 # Webhook 方式（简单，推荐用于机器人消息）
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
+FEISHU_WEBHOOK = os.getenv(
+    "FEISHU_WEBHOOK",
+    "https://open.feishu.cn/open-apis/bot/v2/hook/46b97530-d458-401a-8678-82da01b3d3ca"
+)
 
 # 应用方式（更强大，可发送富文本卡片）
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")

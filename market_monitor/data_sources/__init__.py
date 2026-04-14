@@ -13,3 +13,10 @@
 每个模块对外暴露唯一函数 fetch() -> dict，
 返回 {"data": ..., "error": str|None, "updated_at": str}。
 """
+
+# 不在此处导入子模块，由使用者直接导入
+# from . import capital
+# from . import valuation
+# from . import sector
+# from . import index_analysis
+# from . import etf_selector

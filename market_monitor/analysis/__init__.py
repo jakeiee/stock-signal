@@ -9,8 +9,9 @@
   stock_selector 选股器：ETF初筛 + 趋势线二次筛选
 """
 
-from . import signal
-from . import scorer
-from . import zhixing
-from . import position_monitor
-from . import stock_selector
+# 不在此处导入子模块，由使用者直接导入
+# from . import signal
+# from . import scorer
+# from . import zhixing
+# from . import position_monitor
+# from . import stock_selector

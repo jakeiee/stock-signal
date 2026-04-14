@@ -327,3 +327,227 @@ API返回空数据
 - Tags: automatic, error, dividend_monitor
 
 ---
+
+## [ERR-20260414-009] wind_app.update_valuation_cache (dividend_monitor)
+
+**Logged**: 2026-04-14T21:42:25.724725
+**Priority**: medium
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+Wind APP专业估值数据更新失败
+
+### Error
+```
+attempted relative import with no known parent package
+```
+
+### Context
+在 main() 函数开始时尝试更新Wind APP估值缓存
+
+### Suggested Fix
+检查网络连接或Wind APP数据源配置
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
+
+## [ERR-20260414-010] wind_app.update_valuation_cache (dividend_monitor)
+
+**Logged**: 2026-04-14T21:42:38.316135
+**Priority**: medium
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+Wind APP专业估值数据更新失败
+
+### Error
+```
+attempted relative import with no known parent package
+```
+
+### Context
+在 main() 函数开始时尝试更新Wind APP估值缓存
+
+### Suggested Fix
+检查网络连接或Wind APP数据源配置
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
+
+## [ERR-20260414-011] feishu.send (dividend_monitor)
+
+**Logged**: 2026-04-14T21:42:40.505894
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送失败
+
+### Error
+```
+飞书API调用失败
+```
+
+### Context
+推送时间: 2026-04-14 21:42
+
+### Suggested Fix
+检查飞书机器人配置和网络连接
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
+
+## [ERR-20260414-012] feishu.send (dividend_monitor)
+
+**Logged**: 2026-04-14T21:42:54.240191
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送失败
+
+### Error
+```
+飞书API调用失败
+```
+
+### Context
+推送时间: 2026-04-14 21:42
+
+### Suggested Fix
+检查飞书机器人配置和网络连接
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
+
+## [ERR-20260414-013] wind_app.update_valuation_cache (dividend_monitor)
+
+**Logged**: 2026-04-14T21:44:54.277504
+**Priority**: medium
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+Wind APP专业估值数据更新失败
+
+### Error
+```
+attempted relative import with no known parent package
+```
+
+### Context
+在 main() 函数开始时尝试更新Wind APP估值缓存
+
+### Suggested Fix
+检查网络连接或Wind APP数据源配置
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
+
+## [ERR-20260414-014] wind_app.update_valuation_cache (dividend_monitor)
+
+**Logged**: 2026-04-14T21:45:00.274015
+**Priority**: medium
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+Wind APP专业估值数据更新失败
+
+### Error
+```
+attempted relative import with no known parent package
+```
+
+### Context
+在 main() 函数开始时尝试更新Wind APP估值缓存
+
+### Suggested Fix
+检查网络连接或Wind APP数据源配置
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
+
+## [ERR-20260414-015] wind_app.update_valuation_cache (dividend_monitor)
+
+**Logged**: 2026-04-14T21:48:59.098919
+**Priority**: medium
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+Wind APP专业估值数据更新失败
+
+### Error
+```
+attempted relative import with no known parent package
+```
+
+### Context
+在 main() 函数开始时尝试更新Wind APP估值缓存
+
+### Suggested Fix
+检查网络连接或Wind APP数据源配置
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
+
+## [ERR-20260414-016] wind_app.update_valuation_cache (dividend_monitor)
+
+**Logged**: 2026-04-14T21:49:17.738840
+**Priority**: medium
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+Wind APP专业估值数据更新失败
+
+### Error
+```
+attempted relative import with no known parent package
+```
+
+### Context
+在 main() 函数开始时尝试更新Wind APP估值缓存
+
+### Suggested Fix
+检查网络连接或Wind APP数据源配置
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
