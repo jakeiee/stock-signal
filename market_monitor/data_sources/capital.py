@@ -150,6 +150,7 @@ def fetch_margin(override: Optional[Dict] = None) -> Dict[str, Any]:
                         "bal_chg_pct":    latest.get("bal_chg_pct"),
                         "rz_bal":         latest.get("rz_bal"),
                         "rq_bal":         latest.get("rq_bal"),
+                        "total_bal":      latest.get("total_bal"),
                         "rz_buy":         latest.get("rz_buy"),
                         "rq_sell":        latest.get("rq_sell"),
                         "mkt_turnover":   latest.get("mkt_turnover"),

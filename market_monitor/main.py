@@ -200,16 +200,17 @@ def main() -> None:
 
     # Step 1 补充：两融数据日志
     mg = capital_data["margin"]
-    if "error" not in mg:
-        mg_src     = {"manual": "手动录入", "eastmoney": "东方财富实时", "csv_cache": "本地缓存"}.get(mg.get("source", ""), mg.get("source", ""))
-        mg_bal     = mg.get("total_bal")
-        mg_chg     = mg.get("bal_chg")
-        mg_rzmr    = mg.get("rz_mktcap_ratio")   # 融资余额/流通市值
-        mg_balmr   = mg.get("bal_mktcap_ratio")   # 两融余额/流通市值
-        mg_rzbuy   = mg.get("rz_buy")
-        mg_rqsell  = mg.get("rq_sell")
-        mg_mktto   = mg.get("mkt_turnover")
-        mg_tratio  = mg.get("turnover_ratio")
+    mg_data = mg.get("data", {})
+    if not mg.get("error") and mg_data:
+        mg_src     = {"manual": "手动录入", "eastmoney": "东方财富实时", "csv_cache": "本地缓存"}.get(mg_data.get("source", ""), mg_data.get("source", ""))
+        mg_bal     = mg_data.get("total_bal")
+        mg_chg     = mg_data.get("bal_chg")
+        mg_rzmr    = mg_data.get("rz_mktcap_ratio")   # 融资余额/流通市值
+        mg_balmr   = mg_data.get("bal_mktcap_ratio")   # 两融余额/流通市值
+        mg_rzbuy   = mg_data.get("rz_buy")
+        mg_rqsell  = mg_data.get("rq_sell")
+        mg_mktto   = mg_data.get("mkt_turnover")
+        mg_tratio  = mg_data.get("turnover_ratio")
         chg_str    = f"  变动 {mg_chg:+.2f}亿" if mg_chg is not None else ""
         rzmr_str   = f"  融资/流通市值 {mg_rzmr:.2f}%" if mg_rzmr is not None else ""
         balmr_str  = f"  两融/流通市值 {mg_balmr:.2f}%" if mg_balmr is not None else ""
@@ -217,7 +218,7 @@ def main() -> None:
         sell_str   = f"  融券卖出 {mg_rqsell:,.2f}亿" if mg_rqsell is not None else ""
         mkt_str    = f"  全市场成交 {mg_mktto:,.2f}亿" if mg_mktto is not None else ""
         tr_str     = f"  两融交易/成交额 {mg_tratio:.2f}%" if mg_tratio is not None else ""
-        print(f"        两融余额  ⬇ [{mg.get('date','?')}] {mg_bal:,.2f}亿{chg_str}{rzmr_str}{balmr_str}{buy_str}{sell_str}{mkt_str}{tr_str}  来源：{mg_src}")
+        print(f"        两融余额  ⬇ [{mg_data.get('date','?')}] {mg_bal:,.2f}亿{chg_str}{rzmr_str}{balmr_str}{buy_str}{sell_str}{mkt_str}{tr_str}  来源：{mg_src}")
     else:
         print(f"        两融余额  ✗  {mg['error']}")
 

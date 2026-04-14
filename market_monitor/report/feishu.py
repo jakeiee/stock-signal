@@ -157,6 +157,57 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     # ═══════════════════════════════════════════════════
     
     # ─────────────────────────────────────────────────────
+    # 全市场成交额
+    # ─────────────────────────────────────────────────────
+    to = cap_data.get("turnover", {})
+    if to and "error" not in to and to.get("turnover") is not None:
+        to_date   = to.get("date", "?")
+        turnover  = to.get("turnover")
+        to_prev   = to.get("turnover_prev")
+        chg_pct   = to.get("chg_pct")
+        
+        # 数据
+        to_str = f"**{turnover:,.0f}亿**"
+        prev_str = f"(昨日{to_prev:,.0f}亿)" if to_prev is not None else ""
+        
+        # 信号
+        if chg_pct is not None:
+            if chg_pct >= 15:
+                to_icon, to_sig = "🔴", "放量明显"
+            elif chg_pct >= 5:
+                to_icon, to_sig = "🟡", "温和放量"
+            elif chg_pct >= -5:
+                to_icon, to_sig = "🟡", "基本持平"
+            elif chg_pct >= -15:
+                to_icon, to_sig = "🟡", "温和缩量"
+            else:
+                to_icon, to_sig = "🟢", "缩量明显"
+        else:
+            to_icon, to_sig = "🟡", "数据异常"
+        
+        # 趋势
+        if chg_pct is not None:
+            if chg_pct >= 15:
+                trend_icon = "📈大幅放量"
+            elif chg_pct >= 5:
+                trend_icon = "📈温和放量"
+            elif chg_pct >= -5:
+                trend_icon = "➡️基本持平"
+            elif chg_pct >= -15:
+                trend_icon = "📉温和缩量"
+            else:
+                trend_icon = "📉大幅缩量"
+        else:
+            trend_icon = "--"
+        
+        # 判断标准
+        criteria = "[>15%=放量 | <-15%=缩量]"
+        
+        lines.append(f"📊 全市场成交额 [{to_date}]")
+        lines.append(f"　　{to_str} {prev_str} | {to_icon}{to_sig} | {trend_icon} {criteria}")
+        lines.append("")
+    
+    # ─────────────────────────────────────────────────────
     # 指南针活跃市值
     # ─────────────────────────────────────────────────────
     znz = cap_data.get("znz_active_cap", {})
@@ -253,60 +304,61 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     # 杠杆资金（两融）
     # ─────────────────────────────────────────────────────
     mg = cap_data.get("margin", {})
-    if mg and "error" not in mg and mg.get("total_bal") is not None:
-        mg_date   = mg.get("date", "?")
-        bal       = mg.get("total_bal")
-        chg       = mg.get("bal_chg")
-        chgpct    = mg.get("bal_chg_pct")
-        rzmr      = mg.get("rz_mktcap_ratio")
-        balmr     = mg.get("bal_mktcap_ratio")
-        rzbuy     = mg.get("rz_buy")
-        mktto     = mg.get("mkt_turnover")
-        tratio    = mg.get("turnover_ratio")
+    if mg and "error" not in mg:
+        # 计算两融总额
+        rz_bal = mg.get("rz_bal")
+        rq_bal = mg.get("rq_bal")
+        total_bal = rz_bal + rq_bal if rz_bal is not None and rq_bal is not None else None
+        
+        if total_bal is not None:
+            mg_date   = mg.get("date", "?")
+            chg       = mg.get("bal_chg")
+            chgpct    = mg.get("bal_chg_pct")
+            rzbuy     = mg.get("rz_buy")
+            mktto     = mg.get("mkt_turnover")
+            tratio    = mg.get("turnover_ratio")
 
         # 数据
-        bal_str = f"**{bal/10000:.2f}万亿**" if bal is not None else "--"
+        bal_str = f"**{total_bal/10000:.2f}万亿**" if total_bal is not None else "--"
         chg_str = f"(日{chg:+.0f}亿, {chgpct:+.2f}%)" if chg is not None else ""
         
-        # 信号
-        if balmr is not None:
-            if balmr >= 3.5:
-                mg_icon, mg_sig = "🔴🔴", "极热预警"
-            elif balmr >= 3.0:
-                mg_icon, mg_sig = "🔴", "偏热"
-            elif balmr >= 2.0:
-                mg_icon, mg_sig = "🟡", "正常"
-            elif balmr >= 1.5:
-                mg_icon, mg_sig = "🟢", "偏冷"
+        # 信号（基于余额变化趋势）
+        if chgpct is not None:
+            if chgpct >= 0.5:
+                mg_icon, mg_sig = "🔴", "杠杆回暖"
+            elif chgpct >= 0:
+                mg_icon, mg_sig = "🟡", "基本持平"
+            elif chgpct >= -0.5:
+                mg_icon, mg_sig = "🟡", "略有下降"
             else:
-                mg_icon, mg_sig = "🟢🟢", "极冷"
+                mg_icon, mg_sig = "🟢", "杠杆降温"
         else:
             mg_icon, mg_sig = "🟡", "正常"
         
-        # 趋势（基于两融/流通市值水位）
-        if balmr is not None:
-            if balmr >= 3.5:
-                trend_icon = "📈风险堆积"
-            elif balmr >= 2.5:
-                trend_icon = "➡️高位震荡"
-            elif balmr >= 1.5:
-                trend_icon = "➡️平稳"
+        # 趋势
+        if chgpct is not None:
+            if chgpct >= 0.5:
+                trend_icon = "📈明显回升"
+            elif chgpct >= 0:
+                trend_icon = "➡️基本平稳"
+            elif chgpct >= -0.5:
+                trend_icon = "➡️小幅下降"
             else:
-                trend_icon = "📉去化"
+                trend_icon = "📉持续下降"
         else:
             trend_icon = "--"
         
         # 判断标准
-        criteria = "[>3%=预警]"
+        criteria = "[日变化>0.5%=回暖 | <-0.5%=降温]"
         
         lines.append(f"⚖️ 杠杆资金（两融） [{mg_date}]")
         lines.append(f"　　{bal_str} {chg_str} | {mg_icon}{mg_sig} | {trend_icon} {criteria}")
         
         # 附加信息（非核心显示）
-        if rzmr is not None:
-            lines.append(f"　　📊 融资/流通 {rzmr:.2f}% | 两融/流通 {balmr:.2f}%")
-        if mktto is not None and rzbuy is not None:
-            lines.append(f"　　💰 成交 {mktto:,.0f}亿 | 融资买入 {rzbuy:,.0f}亿 | 融资/成交 {tratio:.2f}%")
+        if mktto is not None:
+            lines.append(f"　　💰 成交 {mktto:,.0f}亿 | 融资余额 {rz_bal:,.0f}亿")
+        if rzbuy is not None:
+            lines.append(f"　　📊 融资买入 {rzbuy:,.0f}亿 | 融资/成交 {tratio:.2f}%" if tratio is not None else f"　　📊 融资买入 {rzbuy:,.0f}亿")
 
         # 趋势警示
         try:
