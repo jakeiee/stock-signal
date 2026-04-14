@@ -55,7 +55,7 @@ def fetch_daily_chg(csindex_code: str, days: int = 300) -> List[Dict]:
                 "low":          float(r.get("low", 0)),
                 "close":        float(close),
                 "volume":       float(r.get("tradingVol", 0)),
-                "turnover":     float(r.get("tradingValue", 0)) / 100000000,  # 转换为亿元
+                "turnover":     float(r.get("tradingValue", 0)),  # 单位已经是亿元
                 "cons_number":  int(r.get("consNumber", 0)),  # 成分股数量
             })
 

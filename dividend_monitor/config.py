@@ -5,7 +5,10 @@
 import os
 
 # ============ 飞书配置 ============
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
+FEISHU_WEBHOOK = os.getenv(
+    "FEISHU_WEBHOOK",
+    "https://open.feishu.cn/open-apis/bot/v2/hook/46b97530-d458-401a-8678-82da01b3d3ca"
+)
 
 # ============ 指数配置 ============
 # 跟踪：红利低波(H30269)、红利质量(931468)、东证红利低波(931446)
