@@ -1,0 +1,51 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "tool_call",
+            "tool_name": "write_text",
+            "tool_args": {
+              "content": "<self-improvement-reminder>\nAfter completing this task, evaluate if extractable knowledge emerged:\n- Non-obvious solution discovered through investigation?\n- Workaround for unexpected behavior?\n- Project-specific pattern learned?\n- Error required debugging to resolve?\n\nIf yes: Log to .learnings/ using the self-improvement skill format.\nIf high-value: Consider skill extraction.\n</self-improvement-reminder>"
+            },
+            "condition": {
+              "probability": 0.8
+            }
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "tool_call",
+            "tool_name": "write_text",
+            "tool_args": {
+              "content": "<error-scan-reminder>\nCommand execution completed. Scan output for errors.\nIf error detected, consider logging to .learnings/ERRORS.md.\n</error-scan-reminder>"
+            },
+            "condition": {
+              "contains_any": [
+                "error:", "Error:", "ERROR:", "failed", "FAILED", 
+                "Command failed", "Traceback", "Exception"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "suggestions": [
+    {
+      "trigger": "task_completion",
+      "suggestion": "Consider adding valuable insights to .learnings/LEARNINGS.md"
+    },
+    {
+      "trigger": "feature_request",
+      "suggestion": "Log this feature request to .learnings/FEATURE_REQUESTS.md"
+    }
+  ]
+}

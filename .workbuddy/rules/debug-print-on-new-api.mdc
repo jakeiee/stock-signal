@@ -1,0 +1,32 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-03-19T07:30:12.867Z
+provider: 
+---
+
+# 新增接口调试输出规范
+
+在 market_monitor 项目中，**每次新增或修改数据接口时**，必须在调试/探测脚本（`_probe_*.py`、`_test_*.py`）以及接口函数本身的首次实现中，完整打印以下四项，方便人工验证：
+
+1. **接口 URL**（完整 URL，包括所有参数）
+2. **原始返回数据**（raw response，JSON 或文本，截取足够长度）
+3. **计算步骤**（如同比 = (当期值 / 上期值 - 1) × 100，需逐步打印中间值）
+4. **最终结果**（最终解析/计算出的数值及单位）
+
+## 示例格式
+
+```python
+print(f"[接口URL] {url}")
+print(f"[原始数据] {json.dumps(raw_data, ensure_ascii=False)[:500]}")
+print(f"[计算步骤] 当期值={current_val}, 上期值={prev_val}")
+print(f"[计算步骤] 同比 = ({current_val} / {prev_val} - 1) × 100 = {yoy:.2f}%")
+print(f"[最终结果] period={period}, income_yoy={yoy:.2f}%")
+```
+
+## 适用范围
+
+- 所有 `market_monitor/data_sources/` 下的接口函数（首次实现时）
+- 所有 `_probe_*.py`、`_test_*.py` 等探测/调试脚本
+- 修改现有接口的解析逻辑时，也需要补充打印验证

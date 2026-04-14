@@ -1,0 +1,36 @@
+{
+  "index_code": "H30269",
+  "index_name": "红利低波",
+  "record_date": "2026-03-31",
+  "record_source": "Wind APP手机记录",
+  "record_timestamp": "2026-03-31 22:46+08:00",
+  "historical_period": "发布以来（2012-10-26至今13.4年）",
+  
+  "valuation_data": {
+    "PE_TTM": {
+      "value": 8.51,
+      "percentile": 78.71,
+      "unit": "倍"
+    },
+    "dividend_yield": {
+      "value": 4.44,
+      "percentile": 38.32,
+      "unit": "%"
+    },
+    "risk_premium": {
+      "value": 9.93,
+      "percentile": 25.85,
+      "unit": "百分点"
+    }
+  },
+  
+  "data_quality_check": {
+    "historical_period_years": 13.4,
+    "data_completeness": "100%（完整发布历史）",
+    "data_source_reliability": "Wind APP - 专业金融数据",
+    "timestamp_consistency": "季度末数据",
+    "quality_grade": "A级（专业源完整历史）"
+  },
+  
+  "analysis_notes": "此次数据基于Wind APP完整历史计算，统计意义显著，相比妙想API仅2.1年历史数据，可靠性大幅提升。"
+}

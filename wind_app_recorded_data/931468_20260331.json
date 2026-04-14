@@ -1,0 +1,36 @@
+{
+  "index_code": "931468",
+  "index_name": "红利质量",
+  "record_date": "2026-03-31",
+  "record_source": "Wind APP手机记录",
+  "record_timestamp": "2026-03-31 22:46+08:00",
+  "historical_period": "发布以来（2020-05-21至今5.9年）",
+  
+  "valuation_data": {
+    "PE_TTM": {
+      "value": 13.78,
+      "percentile": 2.46,
+      "unit": "倍"
+    },
+    "dividend_yield": {
+      "value": 2.71,
+      "percentile": 54.58,
+      "unit": "%"
+    },
+    "risk_premium": {
+      "value": 5.45,
+      "percentile": 98.03,
+      "unit": "百分点"
+    }
+  },
+  
+  "data_quality_check": {
+    "historical_period_years": 5.9,
+    "data_completeness": "100%（完整发布历史）",
+    "data_source_reliability": "Wind APP - 专业金融数据",
+    "timestamp_consistency": "季度末数据",
+    "quality_grade": "A级（专业源完整历史）"
+  },
+  
+  "analysis_notes": "红利质量指数发布仅5.9年，历史数据相对较短，但相比妙想API的12个交易日数据，统计意义已大幅提升。PE处于历史2.46%分位，极度低估。"
+}

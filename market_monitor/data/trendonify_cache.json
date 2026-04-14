@@ -1,0 +1,41 @@
+{
+  "source": "trendonify",
+  "date": "2026-04-06",
+  "note": "通过Playwright动态获取",
+  "US": {
+    "pe": 23.87,
+    "ticker": "SPX",
+    "pct_10y": 71.7,
+    "pct_20y": 80.8,
+    "label_10y": "高估",
+    "label_20y": "昂贵",
+    "last_update": "Apr 6, 2026"
+  },
+  "KR": {
+    "pe": 19.4,
+    "ticker": "EWY",
+    "pct_10y": 98.3,
+    "pct_20y": 99.2,
+    "label_10y": "昂贵",
+    "label_20y": "昂贵",
+    "last_update": "Apr 2, 2026"
+  },
+  "JP": {
+    "pe": 19.39,
+    "ticker": "EWJ",
+    "pct_10y": 100,
+    "pct_20y": 95.8,
+    "label_10y": "昂贵",
+    "label_20y": "昂贵",
+    "last_update": "Apr 2, 2026"
+  },
+  "HK": {
+    "pe": 13.56,
+    "ticker": "HSI",
+    "pct_10y": 77.3,
+    "pct_20y": 69.9,
+    "label_10y": "高估",
+    "label_20y": "高估",
+    "last_update": "Apr 2, 2026"
+  }
+}

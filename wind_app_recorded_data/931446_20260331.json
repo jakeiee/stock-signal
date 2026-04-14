@@ -1,0 +1,36 @@
+{
+  "index_code": "931446",
+  "index_name": "东证红利低波",
+  "record_date": "2026-03-31",
+  "record_source": "Wind APP手机记录",
+  "record_timestamp": "2026-03-31 22:46+08:00",
+  "historical_period": "发布以来（2020-04-21至今5.9年）",
+  
+  "valuation_data": {
+    "PE_TTM": {
+      "value": 8.51,
+      "percentile": 80.33,
+      "unit": "倍"
+    },
+    "dividend_yield": {
+      "value": 4.41,
+      "percentile": 30.51,
+      "unit": "%"
+    },
+    "risk_premium": {
+      "value": 9.94,
+      "percentile": 25.23,
+      "unit": "百分点"
+    }
+  },
+  
+  "data_quality_check": {
+    "historical_period_years": 5.9,
+    "data_completeness": "100%（完整发布历史）",
+    "data_source_reliability": "Wind APP - 专业金融数据",
+    "timestamp_consistency": "季度末数据",
+    "quality_grade": "A级（专业源完整历史）"
+  },
+  
+  "analysis_notes": "PE处于历史80.33%分位，相对高估。股息率4.41%处于历史30.51%分位，相对较低。需关注后续季度变化趋势。"
+}
