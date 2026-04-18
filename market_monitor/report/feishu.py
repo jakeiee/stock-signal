@@ -62,16 +62,41 @@ def _chg_str(val):
 # 维度摘要（一句话）
 # ─────────────────────────────────────────────────────────────
 
+def _get_cap_data(cap_dim: dict) -> dict:
+    """兼容多种数据结构，提取嵌套的 data 层"""
+    if not isinstance(cap_dim, dict):
+        return {}
+    
+    # 如果直接包含 znz_active_cap 等键（扁平结构）
+    if "znz_active_cap" in cap_dim:
+        result = {}
+        for key, val in cap_dim.items():
+            # 如果值是 {"data": {...}, "error": ...} 格式，提取 data 层
+            if isinstance(val, dict) and "data" in val:
+                result[key] = val.get("data", {})
+            else:
+                result[key] = val
+        return result
+    
+    # 如果是 {"data": {...}} 包装结构
+    inner = cap_dim.get("data", {})
+    if isinstance(inner, dict) and "znz_active_cap" not in inner:
+        # 内部又嵌套了 data
+        return inner
+    
+    return inner
+
+
 def _cap_summary(cap_dim: dict) -> str:
-    cap_data = cap_dim.get("data", {})
+    cap_data = _get_cap_data(cap_dim)
     znz = cap_data.get("znz_active_cap", {})
     mg  = cap_data.get("margin", {})
     na  = cap_data.get("new_accounts", {})
     parts = []
 
-    znz_s = znz.get("signal") if znz and "error" not in znz else None
-    znz_c = znz.get("chg_pct") if znz and "error" not in znz else None
-    mg_chg = mg.get("bal_chg_pct") if mg and "error" not in mg else None
+    znz_s = znz.get("signal") if znz and znz.get("error") is None else None
+    znz_c = znz.get("chg_pct") if znz and znz.get("error") is None else None
+    mg_chg = mg.get("bal_chg_pct") if mg and mg.get("error") is None else None
 
     if znz_s == "incremental":   parts.append("🟢增量资金入场")
     elif znz_s == "exit":        parts.append("🔴资金离场警示")
@@ -81,7 +106,7 @@ def _cap_summary(cap_dim: dict) -> str:
         if mg_chg > 0.3:   parts.append("杠杆回暖")
         elif mg_chg < -0.3: parts.append("杠杆降温")
 
-    na_val = na.get("new_accounts") if na and "error" not in na else None
+    na_val = na.get("new_accounts") if na and na.get("error") is None else None
     if na_val is not None:
         if na_val >= 500:      parts.append("散户情绪过热")
         elif na_val <= 200:    parts.append("散户情绪低迷")
@@ -96,9 +121,9 @@ def _fun_summary(fun_dim: dict) -> str:
     sd  = fd.get("supply_demand", {})
     parts = []
 
-    pe_pct  = val.get("pe_pct") if val and "error" not in val else None
-    gdp_yoy = gdp.get("gdp_yoy") if gdp and "error" not in gdp else None
-    pmi     = sd.get("pmi_mfg") if sd and "error" not in sd else None
+    pe_pct  = val.get("pe_pct") if val and val.get("error") is None else None
+    gdp_yoy = gdp.get("gdp_yoy") if gdp and gdp.get("error") is None else None
+    pmi     = sd.get("pmi_mfg") if sd and sd.get("error") is None else None
 
     if pe_pct is not None:
         if pe_pct >= 80:   parts.append("估值偏高")
@@ -118,14 +143,14 @@ def _glb_summary(glb_dim: dict) -> str:
     asia = gd.get("asia", {})
     parts = []
 
-    if us and "error" not in us:
+    if us and us.get("error") is None:
         spx   = (us.get("SPX") or {}).get("chg5d_pct")
         above = us.get("spx_above_ma200")
         if spx is not None:
             parts.append("美股" + ("强势" if spx >= 3 else ("回调" if spx <= -3 else "震荡")))
         if above is False:
             parts.append("均线空头")
-    if asia and "error" not in asia:
+    if asia and asia.get("error") is None:
         hsi_chg = (asia.get("HSI") or {}).get("chg5d_pct")
         if hsi_chg is not None:
             parts.append("港股" + ("走强" if hsi_chg >= 3 else ("偏弱" if hsi_chg <= -3 else "震荡")))
@@ -149,7 +174,7 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     方案3：卡片矩阵式 - 使用分隔符形成视觉块
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     """
-    cap_data = cap_dim.get("data", {})
+    cap_data = _get_cap_data(cap_dim)
     lines = []
 
     # ═══════════════════════════════════════════════════
@@ -160,7 +185,7 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     # 全市场成交额
     # ─────────────────────────────────────────────────────
     to = cap_data.get("turnover", {})
-    if to and "error" not in to and to.get("turnover") is not None:
+    if to and to.get("error") is None and to.get("turnover") is not None:
         to_date   = to.get("date", "?")
         turnover  = to.get("turnover")
         to_prev   = to.get("turnover_prev")
@@ -211,7 +236,7 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     # 指南针活跃市值
     # ─────────────────────────────────────────────────────
     znz = cap_data.get("znz_active_cap", {})
-    if znz and "error" not in znz:
+    if znz and znz.get("error") is None:
         znz_date = znz.get("date", "?")
         znz_cap  = znz.get("active_cap")
         znz_chg  = znz.get("chg_pct")
@@ -256,7 +281,7 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     # 散户新开户
     # ─────────────────────────────────────────────────────
     na = cap_data.get("new_accounts", {})
-    if na and "error" not in na and na.get("new_accounts") is not None:
+    if na and na.get("error") is None and na.get("new_accounts") is not None:
         na_val = na.get("new_accounts")
         period = na.get("period", "?")
         mom    = na.get("mom_pct")
@@ -304,19 +329,18 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     # 杠杆资金（两融）
     # ─────────────────────────────────────────────────────
     mg = cap_data.get("margin", {})
-    if mg and "error" not in mg:
+    if mg and mg.get("error") is None:
         # 计算两融总额
         rz_bal = mg.get("rz_bal")
         rq_bal = mg.get("rq_bal")
         total_bal = rz_bal + rq_bal if rz_bal is not None and rq_bal is not None else None
         
-        if total_bal is not None:
-            mg_date   = mg.get("date", "?")
-            chg       = mg.get("bal_chg")
-            chgpct    = mg.get("bal_chg_pct")
-            rzbuy     = mg.get("rz_buy")
-            mktto     = mg.get("mkt_turnover")
-            tratio    = mg.get("turnover_ratio")
+        mg_date   = mg.get("date", "?")
+        chg       = mg.get("bal_chg")
+        chgpct    = mg.get("bal_chg_pct")
+        rzbuy     = mg.get("rz_buy")
+        mktto     = mg.get("mkt_turnover")
+        tratio    = mg.get("turnover_ratio")
 
         # 数据
         bal_str = f"**{total_bal/10000:.2f}万亿**" if total_bal is not None else "--"
@@ -382,7 +406,7 @@ def _fun_kpi_block(fun_dim: dict) -> str:
 
     # 估值
     val = fd.get("valuation", {})
-    if val and "error" not in val and val.get("pe") is not None:
+    if val and val.get("error") is None and val.get("pe") is not None:
         pe     = val.get("pe")
         pe_pct = val.get("pe_pct")
         pb     = val.get("pb")
@@ -408,8 +432,8 @@ def _fun_kpi_block(fun_dim: dict) -> str:
     gdp = fd.get("gdp", {})
     gdp_interp = fd.get("gdp_interpretation", {})
     di  = fd.get("disposable_income", {})
-    has_gdp = gdp and "error" not in gdp and gdp.get("gdp_yoy") is not None
-    has_di  = di  and "error" not in di  and di.get("income_yoy") is not None
+    has_gdp = gdp and gdp.get("error") is None and gdp.get("gdp_yoy") is not None
+    has_di  = di  and di.get("error") is None  and di.get("income_yoy") is not None
     
     if has_gdp or has_di:
         period = gdp.get("period", "?") if has_gdp else di.get("period", "?")
@@ -424,7 +448,7 @@ def _fun_kpi_block(fun_dim: dict) -> str:
             
             # 从gdp_interpretation获取官方解读
             interp_text = ""
-            if gdp_interp and "error" not in gdp_interp:
+            if gdp_interp and gdp_interp.get("error") is None:
                 interpretation = gdp_interp.get("interpretation", {})
                 summary = interpretation.get("summary", "") if interpretation else ""
                 if summary:
@@ -469,7 +493,7 @@ def _fun_kpi_block(fun_dim: dict) -> str:
 
     # PMI/CPI/PPI
     sd = fd.get("supply_demand", {})
-    if sd and "error" not in sd:
+    if sd and sd.get("error") is None:
         cpi    = sd.get("cpi_yoy")
         ppi    = sd.get("ppi_yoy")
         spread = sd.get("ppi_cpi_spread")
@@ -498,7 +522,7 @@ def _fun_kpi_block(fun_dim: dict) -> str:
             # 官方解读（浓缩核心）
             cpi_ppi_interp = fd.get("cpi_ppi_interpretation", {})
             interp_text = ""
-            if cpi_ppi_interp and "error" not in cpi_ppi_interp:
+            if cpi_ppi_interp and cpi_ppi_interp.get("error") is None:
                 interpretation = cpi_ppi_interp.get("interpretation", {})
                 summary = interpretation.get("summary", "") if interpretation else ""
                 if summary:
@@ -558,7 +582,7 @@ def _fun_kpi_block(fun_dim: dict) -> str:
             # 官方解读（浓缩一句，不截断）
             pmi_interp = fd.get("pmi_interpretation", {})
             interp_text = ""
-            if pmi_interp and "error" not in pmi_interp:
+            if pmi_interp and pmi_interp.get("error") is None:
                 interp = pmi_interp.get("interpretation", {})
                 summary = interp.get("summary", "")
                 if summary:
@@ -599,7 +623,7 @@ def _fun_kpi_block(fun_dim: dict) -> str:
 
     # M2/社融/国债
     liq = fd.get("liquidity", {})
-    if liq and "error" not in liq:
+    if liq and liq.get("error") is None:
         m2   = liq.get("m2_yoy")
         sf   = liq.get("social_fin_yoy")
         bond = liq.get("bond_10y")
@@ -624,7 +648,7 @@ def _policy_kpi_block(pol_dim: dict) -> str:
     monetary = pol_data.get("monetary", {})
     lines = []
     
-    if monetary and "error" not in monetary:
+    if monetary and monetary.get("error") is None:
         signal = monetary.get("signal", "🟡 货币中性")
         date = monetary.get("date", "")
         lines.append(f"**🗄️ 货币政策** [{date}]")
@@ -1293,7 +1317,7 @@ def build_cards(report_data: dict) -> list:
     # 指南针信号（用于仓位建议）- 使用最近明显信号，避免追涨杀跌
     cap_data_raw = cap_dim.get("data", {})
     znz = cap_data_raw.get("znz_active_cap", {})
-    znz_signal = znz.get("last_clear_signal") if znz and "error" not in znz else None
+    znz_signal = znz.get("last_clear_signal") if znz and znz.get("error") is None else None
 
     pos_range, pos_reason = _score_to_position(comp_s, znz_signal, cap_s, fun_s, pol_s, glb_s)
     risks    = _collect_risks(report_data)
@@ -1304,7 +1328,7 @@ def build_cards(report_data: dict) -> list:
     # 政策面：从monetary数据获取
     pol_data = pol_dim.get("data", {})
     monetary = pol_data.get("monetary", {})
-    if monetary and "error" not in monetary:
+    if monetary and monetary.get("error") is None:
         signal = monetary.get("signal", "🟡 货币中性")
         bond = monetary.get("bond_10y")
         # MLF无数据时不展示

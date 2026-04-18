@@ -19,3 +19,6 @@ FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
 
 # 飞书群 ID（用于应用消息推送）
 FEISHU_CHAT_ID = os.getenv("FEISHU_CHAT_ID", "")
+
+# 飞书图片上传接口
+FEISHU_UPLOAD_URL = "https://open.feishu.cn/open-apis/im/v1/images"
