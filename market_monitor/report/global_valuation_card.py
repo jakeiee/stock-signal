@@ -245,6 +245,8 @@ def fetch_enhanced_global_valuation() -> Dict[str, Any]:
             "dev_10y": jp_base.get("dev_10y", ""),
             "date": jp_base.get("date", ""),
             "source": jp_base.get("source", ""),
+            "pct_10y_accurate": False,  # trendonify 数据不准确
+            "pct_max_accurate": False,
         })
     
     # 补充韩股数据
@@ -259,6 +261,8 @@ def fetch_enhanced_global_valuation() -> Dict[str, Any]:
             "date": kr_base.get("date", ""),
             "source": kr_base.get("source", ""),
             "note": kr_base.get("note", ""),
+            "pct_10y_accurate": False,  # trendonify 数据不准确
+            "pct_max_accurate": False,
         })
     
     return result

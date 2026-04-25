@@ -795,8 +795,8 @@ def main():
     # 创建飞书文档
     doc_id, doc_url = create_feishu_doc(output_path)
 
-    # 发送到飞书
-    send_to_feishu(output_path, doc_url)
+    # 发送到飞书（传入 results 生成精简消息）
+    send_to_feishu(output_path, doc_url, results)
 
 
 def create_feishu_doc(md_file_path: str) -> tuple:
@@ -834,8 +834,70 @@ def create_feishu_doc(md_file_path: str) -> tuple:
         return None, None
 
 
-def send_to_feishu(md_file_path: str, doc_url: str = None):
-    """发送 MD 报告到飞书"""
+def build_summary_message(results: list, doc_url: str = None) -> str:
+    """构建中等版精简消息"""
+    lines = []
+
+    # 分类统计
+    strong_signals = [r for r in results if r.get("signal") == "STRONG"]
+    watch_signals = [r for r in results if r.get("signal") == "WATCH"]
+    danger_signals = [r for r in results if r.get("signal") == "DANGER"]
+
+    # 汇总行
+    total = len(results)
+    lines.append(f"📊 **持仓汇总**: {total} 只 | 🟢强势{len(strong_signals)} | 🟡观望{len(watch_signals)} | 🔴危险{len(danger_signals)}")
+
+    # 操作建议
+    lines.append("")
+    lines.append("### 🟢 强势标的")
+    if strong_signals:
+        for r in strong_signals[:3]:  # 最多3只
+            action = _get_action(r)
+            lines.append(f"- **{r.get('etf_name', '')}**: {action}")
+    else:
+        lines.append("- 暂无")
+
+    lines.append("")
+    lines.append("### 🔴 危险标的")
+    if danger_signals:
+        for r in danger_signals[:3]:  # 最多3只
+            action = _get_action(r)
+            lines.append(f"- **{r.get('etf_name', '')}**: {action}")
+    else:
+        lines.append("- 暂无")
+
+    return "\n".join(lines)
+
+
+def _get_action(r: dict) -> str:
+    """获取单只ETF的操作建议"""
+    sig = r.get("signal", "")
+    rsi = r.get("rsi14", 50)
+    pos = r.get("position_level", 50)
+
+    if sig == "STRONG":
+        if rsi > 70:
+            return "持有/减仓"
+        elif rsi < 30:
+            return "加仓机会"
+        else:
+            return "持有"
+    elif sig == "WATCH":
+        if rsi < 30:
+            return "关注"
+        else:
+            return "观望"
+    else:  # DANGER
+        if rsi < 30:
+            return "等待"
+        elif pos < 40:
+            return "关注"
+        else:
+            return "减仓"
+
+
+def send_to_feishu(md_file_path: str, doc_url: str = None, results: list = None):
+    """发送精简报告到飞书"""
     try:
         import requests
         from market_monitor.config import FEISHU_WEBHOOK
@@ -844,47 +906,18 @@ def send_to_feishu(md_file_path: str, doc_url: str = None):
             print("⚠ 飞书 Webhook 未配置，跳过发送")
             return False
 
-        # 读取 MD 文件
-        with open(md_file_path, 'r', encoding='utf-8') as f:
-            md_content = f.read()
+        # 构建消息内容
+        if results:
+            content = build_summary_message(results, doc_url)
+        else:
+            # 降级：读取文件内容
+            with open(md_file_path, 'r', encoding='utf-8') as f:
+                md_content = f.read()
+            max_len = 2000
+            content = md_content[:max_len] + "\n\n...（内容过长，点击链接查看完整报告）"
 
-        # 限制内容长度（飞书卡片单条消息有限制）
-        max_len = 3000
-        if len(md_content) > max_len:
-            md_content = md_content[:max_len] + "\n\n...（内容过长，已截断）"
-
-        # 构建飞书卡片消息
-        elements = []
-
-        # 添加文档链接
-        if doc_url:
-            elements.append({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"📄 **飞书文档**: [点击查看完整报告]({doc_url})"
-                }
-            })
-
-        # 添加内容摘要
-        elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": md_content
-            }
-        })
-
-        # 添加时间戳
-        elements.append({
-            "tag": "note",
-            "elements": [
-                {
-                    "tag": "plain_text",
-                    "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
-                }
-            ]
-        })
+        # 获取标题时间
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         # 构建飞书卡片消息
         payload = {
@@ -896,13 +929,49 @@ def send_to_feishu(md_file_path: str, doc_url: str = None):
                 "header": {
                     "title": {
                         "tag": "plain_text",
-                        "content": "📊 持仓分析报告"
+                        "content": f"📊 {date_str} 持仓分析报告"
                     },
                     "template": "blue"
                 },
-                "elements": elements
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": content
+                        }
+                    }
+                ]
             }
         }
+
+        # 添加文档链接按钮
+        if doc_url:
+            payload["card"]["elements"].append({
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": "📄 查看完整报告"
+                        },
+                        "type": "primary",
+                        "url": doc_url
+                    }
+                ]
+            })
+
+        # 添加时间戳
+        payload["card"]["elements"].append({
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
+                }
+            ]
+        })
 
         # 发送请求
         response = requests.post(
