@@ -45,19 +45,20 @@ class LoadPositionsStep(Step):
     """Step 1: 加载持仓数据"""
     
     def __init__(self, positions_file: str = "./positions.json"):
-        super().__init__(
-            name="load_positions",
-            description="加载持仓ETF列表"
-        )
+        super().__init__()
+        self.name = "load_positions"
         self.positions_file = positions_file
     
+    def validate(self) -> bool:
+        return True
+
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             if not os.path.exists(self.positions_file):
                 return StepResult(
                     step_name=self.name,
-                    status=StepStatus.FAILED,
-                    message=f"持仓文件不存在: {self.positions_file}"
+                    status=StepStatus.FAILED.value,
+                    error=f"持仓文件不存在: {self.positions_file}"
                 )
             
             with open(self.positions_file, 'r', encoding='utf-8') as f:
@@ -68,15 +69,14 @@ class LoadPositionsStep(Step):
             
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.SUCCESS,
-                message=f"加载 {len(positions)} 只持仓ETF",
-                data={"positions": positions}
+                status=StepStatus.SUCCESS.value,
+                output={"positions": positions}
             )
         except Exception as e:
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.FAILED,
-                message=f"加载持仓失败: {e}"
+                status=StepStatus.FAILED.value,
+                error=f"加载持仓失败: {e}"
             )
 
 
@@ -84,12 +84,13 @@ class AnalyzeETFStep(Step):
     """Step 2: 分析单只ETF"""
     
     def __init__(self, data_key: str = "positions"):
-        super().__init__(
-            name="analyze_etf",
-            description="分析ETF技术指标"
-        )
+        super().__init__()
+        self.name = "analyze_etf"
         self.data_key = data_key
     
+    def validate(self) -> bool:
+        return True
+
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             positions = ctx.get(self.data_key, [])
@@ -128,9 +129,8 @@ class AnalyzeETFStep(Step):
             
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.SUCCESS,
-                message=f"分析完成: {len(results)}/{len(positions)} 只ETF",
-                data={
+                status=StepStatus.SUCCESS.value,
+                output={
                     "results": results,
                     "failed": failed
                 }
@@ -138,8 +138,8 @@ class AnalyzeETFStep(Step):
         except Exception as e:
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.FAILED,
-                message=f"分析失败: {e}"
+                status=StepStatus.FAILED.value,
+                error=f"分析失败: {e}"
             )
 
 
@@ -147,20 +147,21 @@ class AggregateSignalStep(Step):
     """Step 3: 聚合信号"""
     
     def __init__(self, data_key: str = "etf_analysis"):
-        super().__init__(
-            name="aggregate_signal",
-            description="聚合持仓信号"
-        )
+        super().__init__()
+        self.name = "aggregate_signal"
         self.data_key = data_key
     
+    def validate(self) -> bool:
+        return True
+
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             results = ctx.get(self.data_key, [])
             if not results:
                 return StepResult(
                     step_name=self.name,
-                    status=StepStatus.FAILED,
-                    message="无分析结果"
+                    status=StepStatus.FAILED.value,
+                    error="无分析结果"
                 )
             
             # 分类统计
@@ -185,15 +186,14 @@ class AggregateSignalStep(Step):
             
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.SUCCESS,
-                message=f"强势:{len(strong)} 观望:{len(watch)} 危险:{len(danger)}",
-                data=summary
+                status=StepStatus.SUCCESS.value,
+                output=summary
             )
         except Exception as e:
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.FAILED,
-                message=f"聚合失败: {e}"
+                status=StepStatus.FAILED.value,
+                error=f"聚合失败: {e}"
             )
 
 
@@ -201,21 +201,22 @@ class GenerateReportStep(Step):
     """Step 4: 生成报告"""
     
     def __init__(self, output_dir: str = ".", feishu: bool = False):
-        super().__init__(
-            name="generate_report",
-            description="生成持仓分析报告"
-        )
+        super().__init__()
+        self.name = "generate_report"
         self.output_dir = output_dir
         self.feishu = feishu
     
+    def validate(self) -> bool:
+        return True
+
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             results = ctx.get("etf_analysis", [])
             if not results:
                 return StepResult(
                     step_name=self.name,
-                    status=StepStatus.FAILED,
-                    message="无分析结果"
+                    status=StepStatus.FAILED.value,
+                    error="无分析结果"
                 )
             
             # 生成报告
@@ -230,15 +231,14 @@ class GenerateReportStep(Step):
             
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.SUCCESS,
-                message=f"报告已保存: {output_path}",
-                data={"path": output_path}
+                status=StepStatus.SUCCESS.value,
+                output={"path": output_path}
             )
         except Exception as e:
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.FAILED,
-                message=f"生成报告失败: {e}"
+                status=StepStatus.FAILED.value,
+                error=f"生成报告失败: {e}"
             )
 
 
@@ -246,12 +246,13 @@ class FeishuPushStep(Step):
     """Step 5: 飞书推送"""
     
     def __init__(self, report_key: str = "report_path"):
-        super().__init__(
-            name="feishu_push",
-            description="推送报告到飞书"
-        )
+        super().__init__()
+        self.name = "feishu_push"
         self.report_key = report_key
     
+    def validate(self) -> bool:
+        return True
+
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             from market_monitor.config import FEISHU_WEBHOOK
@@ -260,16 +261,16 @@ class FeishuPushStep(Step):
             if not FEISHU_WEBHOOK:
                 return StepResult(
                     step_name=self.name,
-                    status=StepStatus.SKIPPED,
-                    message="飞书 Webhook 未配置"
+                    status=StepStatus.SKIPPED.value,
+                    error="飞书 Webhook 未配置"
                 )
             
             report_path = ctx.get(self.report_key)
             if not report_path or not os.path.exists(report_path):
                 return StepResult(
                     step_name=self.name,
-                    status=StepStatus.SKIPPED,
-                    message="报告文件不存在"
+                    status=StepStatus.SKIPPED.value,
+                    error="报告文件不存在"
                 )
             
             with open(report_path, 'r', encoding='utf-8') as f:
@@ -309,20 +310,20 @@ class FeishuPushStep(Step):
             if result.get('code') == 0:
                 return StepResult(
                     step_name=self.name,
-                    status=StepStatus.SUCCESS,
-                    message="报告已发送到飞书"
+                    status=StepStatus.SUCCESS.value,
+                    output="报告已发送到飞书"
                 )
             else:
                 return StepResult(
                     step_name=self.name,
-                    status=StepStatus.FAILED,
-                    message=f"飞书发送失败: {result}"
+                    status=StepStatus.FAILED.value,
+                    error=f"飞书发送失败: {result}"
                 )
         except Exception as e:
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.FAILED,
-                message=f"飞书推送失败: {e}"
+                status=StepStatus.FAILED.value,
+                error=f"飞书推送失败: {e}"
             )
 
 
@@ -330,11 +331,12 @@ class TerminalOutputStep(Step):
     """Step 6: 终端输出"""
     
     def __init__(self):
-        super().__init__(
-            name="terminal_output",
-            description="终端输出汇总"
-        )
+        super().__init__()
+        self.name = "terminal_output"
     
+    def validate(self) -> bool:
+        return True
+
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             summary = ctx.get("signal_summary", {})
@@ -361,14 +363,14 @@ class TerminalOutputStep(Step):
             
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.SUCCESS,
-                message="终端输出完成"
+                status=StepStatus.SUCCESS.value,
+                output="终端输出完成"
             )
         except Exception as e:
             return StepResult(
                 step_name=self.name,
-                status=StepStatus.FAILED,
-                message=f"输出失败: {e}"
+                status=StepStatus.FAILED.value,
+                error=f"输出失败: {e}"
             )
 
 

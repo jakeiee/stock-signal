@@ -7,6 +7,10 @@
   ③ 指标详情：资金面 / 基本面 / 政策面 / 全球市场
 
 数据逻辑复用 md_report 中的辅助函数，格式转为飞书 lark_md。
+
+解读解析：支持 LLM 自动解析（通义千问）和规则解析双轨模式。
+  - LLM_ENABLED=True 且 API 可用时：使用通义千问解析官方解读
+  - LLM 不可用时：回退到规则解析
 """
 
 import requests
@@ -16,6 +20,18 @@ from typing import Optional
 from ..config import FEISHU_WEBHOOK
 from ..data_sources.trendonify import fetch_trendonify_valuation
 from .valuation_image import generate_valuation_image
+
+# LLM 解析模块
+try:
+    from ..utils.llm_interpreter import (
+        parse_cpi_ppi_interpretation,
+        parse_pmi_interpretation,
+        parse_gdp_interpretation,
+        parse_income_interpretation
+    )
+    LLM_INTERPRETER_AVAILABLE = True
+except ImportError:
+    LLM_INTERPRETER_AVAILABLE = False
 # 临时修复：提供缺失的函数实现
 def _score_icon(score, neutral_threshold=0.3):
     """根据得分返回图标"""
@@ -182,7 +198,7 @@ def _cap_kpi_block(cap_dim: dict) -> str:
     # ═══════════════════════════════════════════════════
     
     # ─────────────────────────────────────────────────────
-    # 全市场成交额
+    # 全市场成交额（分市场）
     # ─────────────────────────────────────────────────────
     to = cap_data.get("turnover", {})
     if to and to.get("error") is None and to.get("turnover") is not None:
@@ -190,6 +206,11 @@ def _cap_kpi_block(cap_dim: dict) -> str:
         turnover  = to.get("turnover")
         to_prev   = to.get("turnover_prev")
         chg_pct   = to.get("chg_pct")
+        
+        # 各市场成交额
+        sh_turnover = to.get("sh_turnover")
+        sz_turnover = to.get("sz_turnover")
+        bj_turnover = to.get("bj_turnover")
         
         # 数据
         to_str = f"**{turnover:,.0f}亿**"
@@ -230,10 +251,22 @@ def _cap_kpi_block(cap_dim: dict) -> str:
         
         lines.append(f"📊 全市场成交额 [{to_date}]")
         lines.append(f"　　{to_str} {prev_str} | {to_icon}{to_sig} | {trend_icon} {criteria}")
+        
+        # 分市场成交额（暂时隐藏）
+        # market_parts = []
+        # if sh_turnover is not None:
+        #     market_parts.append(f"沪{sh_turnover:,.0f}亿")
+        # if sz_turnover is not None:
+        #     market_parts.append(f"深{sz_turnover:,.0f}亿")
+        # if bj_turnover is not None:
+        #     market_parts.append(f"京{bj_turnover:,.0f}亿")
+        # if market_parts:
+        #     lines.append(f"　　{' / '.join(market_parts)}")
+        
         lines.append("")
     
     # ─────────────────────────────────────────────────────
-    # 指南针活跃市值
+    # 指南针活跃市值（入场/持有/离场周期）
     # ─────────────────────────────────────────────────────
     znz = cap_data.get("znz_active_cap", {})
     if znz and znz.get("error") is None:
@@ -244,32 +277,60 @@ def _cap_kpi_block(cap_dim: dict) -> str:
         znz_desc = znz.get("signal_desc", "")
         znz_pos  = znz.get("position_suggest", "")
         
+        # 新增：入场/持有/离场周期判断
+        current_signal = znz.get("current_signal", "")
+        current_signal_desc = znz.get("current_signal_desc", "")
+        zone_type = znz.get("zone_type", "neutral")
+        zone_desc = znz.get("zone_desc", "观望")
+        last_signal = znz.get("last_clear_signal", "")
+        last_signal_date = znz.get("last_clear_signal_date", "")
+        entry_th = znz.get("entry_threshold", 4.0)
+        exit_th = znz.get("exit_threshold", -2.3)
+        
         # 数据
         cap_str  = f"**{znz_cap/10000:.2f}万亿**" if znz_cap is not None else "--"
         chg_str  = f"({znz_chg:+.2f}%)" if znz_chg is not None else ""
         
-        # 信号
-        sig_icon = {"incremental": "🟢", "exit": "🔴", "neutral": "🟡"}.get(znz_sig, "🟡")
-        sig_text = znz_desc or {"incremental": "增量入场", "exit": "资金离场", "neutral": "观望"}.get(znz_sig, "观望")
+        # 区间图标（用于区分多头/空头）
+        zone_icon = {"bullish": "🟢", "bearish": "🔴", "neutral": "🟡"}.get(zone_type, "🟡")
+        
+        # 当前信号
+        if current_signal == "entry":
+            sig_icon = "🟢"
+            sig_text = "入场信号"
+        elif current_signal == "exit":
+            sig_icon = "🔴"
+            sig_text = "离场信号"
+        elif current_signal == "holding":
+            # 持有中使用中性图标🟡，括号内说明区间
+            sig_icon = "🟡"
+            sig_text = f"持有中({zone_desc})"
+        else:
+            sig_icon = {"incremental": "🟢", "exit": "🔴", "neutral": "🟡"}.get(znz_sig, "🟡")
+            sig_text = znz_desc or current_signal_desc or {"incremental": "增量入场", "exit": "资金离场", "neutral": "观望"}.get(znz_sig, "观望")
         
         # 趋势（基于涨跌幅趋势判断）
         if znz_chg is not None:
-            if znz_chg >= 4:
-                trend_icon = "📈强势"
-            elif znz_chg >= 0:
-                trend_icon = "➡️平稳"
-            elif znz_chg >= -2.3:
-                trend_icon = "➡️回落"
+            if znz_chg >= entry_th:
+                trend_icon = "📈入场"
+            elif znz_chg <= exit_th:
+                trend_icon = "📉离场"
             else:
-                trend_icon = "📉偏弱"
+                trend_icon = "➡️持有"
         else:
             trend_icon = "--"
         
-        # 判断标准（放在右上方，用方括号标识）
-        criteria = "[≥4%=入场 | ≤-2.3%=离场]"
+        # 判断标准（使用空格分隔避免markdown解析问题）
+        criteria = f"[>{entry_th}%=入场 / <{exit_th}%=离场]"
         
         lines.append(f"🧭 指南针活跃市值 [{znz_date}]")
         lines.append(f"　　{cap_str} {chg_str} | {sig_icon}{sig_text} | {trend_icon} {criteria}")
+        
+        # 区间状态说明
+        if last_signal:
+            sig_mark = "入场" if last_signal == "entry" else "离场"
+            lines.append(f"　　📍 当前{zone_desc} | 上次{sig_mark}: {last_signal_date}")
+        
         if znz_pos:
             lines.append(f"　　📌 建议仓位：**{znz_pos}**")
     else:
@@ -338,9 +399,12 @@ def _cap_kpi_block(cap_dim: dict) -> str:
         mg_date   = mg.get("date", "?")
         chg       = mg.get("bal_chg")
         chgpct    = mg.get("bal_chg_pct")
-        rzbuy     = mg.get("rz_buy")
-        mktto     = mg.get("mkt_turnover")
-        tratio    = mg.get("turnover_ratio")
+        rzbuy     = mg.get("rz_buy")          # 融资买入额
+        loan_sell = mg.get("loan_sell_amt")   # 融资卖出额
+        rz_trade  = mg.get("rz_trade_amt")    # 融资交易额 = 融资买入 + 融资卖出
+        rz_yezb   = mg.get("rz_yezb")        # 两融余额占A股流通市值比例（%）
+        mktto     = mg.get("mkt_turnover")    # 全市场成交额
+        rz_turnover_ratio = mg.get("rz_turnover_ratio")  # 两融交易额占成交额比例
 
         # 数据
         bal_str = f"**{total_bal/10000:.2f}万亿**" if total_bal is not None else "--"
@@ -378,11 +442,20 @@ def _cap_kpi_block(cap_dim: dict) -> str:
         lines.append(f"⚖️ 杠杆资金（两融） [{mg_date}]")
         lines.append(f"　　{bal_str} {chg_str} | {mg_icon}{mg_sig} | {trend_icon} {criteria}")
         
-        # 附加信息（非核心显示）
-        if mktto is not None:
-            lines.append(f"　　💰 成交 {mktto:,.0f}亿 | 融资余额 {rz_bal:,.0f}亿")
+        # 两融余额占A股流通市值比例
+        if rz_yezb is not None:
+            lines.append(f"　　📊 两融余额/流通市值 **{rz_yezb:.2f}%**")
+        
+        # 两融交易额占A股成交额比例（直接来自接口）
+        if rz_turnover_ratio is not None:
+            lines.append(f"　　💹 两融交易额/成交额 **{rz_turnover_ratio:.2f}%**")
+        
+        # 融资买入/卖出详情
         if rzbuy is not None:
-            lines.append(f"　　📊 融资买入 {rzbuy:,.0f}亿 | 融资/成交 {tratio:.2f}%" if tratio is not None else f"　　📊 融资买入 {rzbuy:,.0f}亿")
+            rzbuy_str = f"融资买入 {rzbuy:,.0f}亿"
+            if loan_sell is not None:
+                rzbuy_str += f" | 融资卖出 {loan_sell:,.0f}亿"
+            lines.append(f"　　📈 {rzbuy_str}")
 
         # 趋势警示
         try:
@@ -391,6 +464,19 @@ def _cap_kpi_block(cap_dim: dict) -> str:
             trend = analyze_margin_trend(history, window=10)
             if trend.get("warning"):
                 lines.append(f"\n⚠️ **趋势警示**：{trend['warning_reason']}")
+            else:
+                # 即使没有警示，也显示趋势状态
+                trend_info = trend.get("trend", {})
+                if trend_info:
+                    rz_yezb = trend_info.get("rz_yezb")
+                    rz_ratio = trend_info.get("rz_turnover_ratio_latest")
+                    trend_desc = trend_info.get("trend_desc", "")
+                    if rz_yezb is not None:
+                        # 简要趋势说明
+                        if rz_yezb > 3.0:
+                            lines.append(f"\n　　⚠️ 两融余额占比{rz_yezb:.2f}%，超过3%警戒线")
+                        else:
+                            lines.append(f"\n　　📊 两融余额占比{rz_yezb:.2f}%，{trend_desc}")
         except Exception:
             pass
     else:
@@ -404,34 +490,37 @@ def _fun_kpi_block(fun_dim: dict) -> str:
     fd = fun_dim.get("data", {})
     lines = []
 
-    # 估值
+    # 估值（数据结构: valuation.data.pe）
     val = fd.get("valuation", {})
-    if val and val.get("error") is None and val.get("pe") is not None:
-        pe     = val.get("pe")
-        pe_pct = val.get("pe_pct")
-        pb     = val.get("pb")
-        div    = val.get("div_yield")
-        vdate  = val.get("date", "?")
+    val_data = val.get("data", {}) if isinstance(val, dict) else {}
+    if val and val.get("error") is None and val_data.get("pe") is not None:
+        pe     = val_data.get("pe")
+        pe_pct = val_data.get("pe_pct")
+        pb     = val_data.get("pb")
+        div    = val_data.get("div_yield")
+        vdate  = val_data.get("date", "")
         if pe_pct is not None:
-            if pe_pct >= 80:   v_icon = "🔴 估值偏高"
-            elif pe_pct < 20:  v_icon = "🟢 估值偏低"
+            if pe_pct >= 70:   v_icon = "🔴 估值偏高"
+            elif pe_pct < 30:  v_icon = "🟢 估值偏低"
             else:              v_icon = "🟡 估值正常"
         else:
             v_icon = ""
         pb_str  = f" | PB {pb:.2f}" if pb else ""
         div_str = f" | 股息 {div:.2f}%" if div else ""
         pct_str = f"第{pe_pct:.0f}%" if pe_pct is not None else ""
-        lines.append(f"📉 **A股估值** 万得全A（除金融石油石化）[{vdate}]")
+        date_str = f"[{vdate}]" if vdate else ""
+        lines.append(f"📉 **A股估值** 万得全A（除金融石油石化）{date_str}")
         lines.append(f"　　PE **{pe:.1f}** {pct_str}{pb_str}{div_str} → {v_icon}")
     else:
         lines.append("📉 A股估值 — 暂无数据")
 
     lines.append("")
 
-    # GDP + 人均收入：方案D格式（数据+走势+解读），一行显示
+    # GDP + 人均收入：使用 LLM 解析官方解读
     gdp = fd.get("gdp", {})
     gdp_interp = fd.get("gdp_interpretation", {})
     di  = fd.get("disposable_income", {})
+    di_interp = fd.get("income_interpretation", {})
     has_gdp = gdp and gdp.get("error") is None and gdp.get("gdp_yoy") is not None
     has_di  = di  and di.get("error") is None  and di.get("income_yoy") is not None
     
@@ -439,22 +528,33 @@ def _fun_kpi_block(fun_dim: dict) -> str:
         period = gdp.get("period", "?") if has_gdp else di.get("period", "?")
         lines.append(f"📈 **经济总量/收入** [{period}]")
         
-        # GDP数据+走势+解读（方案D格式）
+        # GDP：优先使用 LLM 解析，否则规则兜底
         if has_gdp:
             gdp_yoy = gdp["gdp_yoy"]
             gdp_mom = gdp.get("gdp_qoq")  # 环比
-            g_icon = "🟢" if gdp_yoy >= 5 else ("🟡" if gdp_yoy >= 3 else "🔴")
             gdp_trend = "↑" if gdp_mom and gdp_mom > 0 else ("↓" if gdp_mom and gdp_mom < 0 else "")
+            g_icon = "🟢" if gdp_yoy >= 5 else ("🟡" if gdp_yoy >= 3 else "🔴")
             
-            # 从gdp_interpretation获取官方解读
+            # 获取解读
             interp_text = ""
+            sentiment = "neutral"
             if gdp_interp and gdp_interp.get("error") is None:
                 interpretation = gdp_interp.get("interpretation", {})
                 summary = interpretation.get("summary", "") if interpretation else ""
-                if summary:
+                if summary and LLM_INTERPRETER_AVAILABLE:
+                    # 使用 LLM 解析
+                    gdp_period = gdp.get("period", "?")
+                    result = parse_gdp_interpretation(
+                        summary=summary,
+                        gdp_yoy=gdp_yoy,
+                        gdp_qoq=gdp_mom,
+                        period=gdp_period
+                    )
+                    interp_text = result.get("key_trend", "")
+                    sentiment = result.get("sentiment", "neutral")
+                elif summary:
+                    # 规则解析兜底
                     first_sentence = summary.split("。")[0] if "。" in summary else summary
-                    # 提取核心解读（简化：去除具体数字，保留关键结论）
-                    # 如："2025年，国内生产总值首次跃上140万亿元新台阶比上年增长5.0%" → "GDP首跃140万亿，稳增长"
                     if "140万亿" in first_sentence or "140万亿元" in first_sentence:
                         interp_text = "GDP首跃140万亿，稳增长"
                     elif "稳" in first_sentence or "向好" in first_sentence:
@@ -464,34 +564,47 @@ def _fun_kpi_block(fun_dim: dict) -> str:
                             interp_text = "经济向优发展"
                         else:
                             interp_text = "经济运行平稳"
-                    elif "增长5.0%" in first_sentence:
-                        interp_text = "GDP增长5.0%，稳增长"
                     else:
-                        # 取前30字
-                        interp_text = first_sentence[:30] + "..." if len(first_sentence) > 30 else first_sentence
                         interp_text = first_sentence
             
-            # 组装：GDP同比5.0%↑ 经济稳中向好
+            # 情绪图标
+            sentiment_icon = {"positive": "🟢", "negative": "🔴"}.get(sentiment, g_icon)
+            
+            # 组装
             if interp_text:
                 lines.append(f"　　GDP同比 {gdp_yoy:+.1f}%{gdp_trend} {interp_text}")
             else:
-                lines.append(f"　　GDP同比 {gdp_yoy:+.1f}%{gdp_trend} {g_icon}")
+                lines.append(f"　　GDP同比 {gdp_yoy:+.1f}%{gdp_trend} {sentiment_icon}")
             
-            # 产业结构（次要信息，可选是否显示）
+            # 产业结构
             p3_pct = gdp.get("p3_pct")
             p3_delta = gdp.get("p3_pct_yoy_delta")
             if p3_pct is not None and p3_delta is not None:
                 lines.append(f"　　三产占比 {p3_pct:.1f}%，同比{p3_delta:+.1f}pp")
         
-        # 人均收入
+        # 人均收入：使用 LLM 解析
         if has_di:
             di_yoy = di["income_yoy"]
             d_icon = "🟢" if di_yoy >= 6 else ("🟡" if di_yoy >= 4 else "🔴")
-            lines.append(f"　　人均收入同比 {di_yoy:+.1f}% {d_icon}")
+            
+            # 获取解读
+            interp_text = ""
+            if di_interp and di_interp.get("error") is None and LLM_INTERPRETER_AVAILABLE:
+                interpretation = di_interp.get("interpretation", {})
+                summary = interpretation.get("summary", "") if interpretation else ""
+                if summary:
+                    di_period = di.get("period", "?")
+                    result = parse_income_interpretation(summary=summary, income_yoy=di_yoy, period=di_period)
+                    interp_text = result.get("key_trend", "")
+            
+            if interp_text:
+                lines.append(f"　　人均收入同比 {di_yoy:+.1f}% {interp_text}")
+            else:
+                lines.append(f"　　人均收入同比 {di_yoy:+.1f}% {d_icon}")
 
     lines.append("")
 
-    # PMI/CPI/PPI
+    # PMI/CPI/PPI：使用 LLM 解析官方解读
     sd = fd.get("supply_demand", {})
     if sd and sd.get("error") is None:
         cpi    = sd.get("cpi_yoy")
@@ -502,13 +615,15 @@ def _fun_kpi_block(fun_dim: dict) -> str:
         period = sd.get("period", "?")
         lines.append(f"🏭 **宏观供需** [{period}]")
         
-        # CPI/PPI：方案D格式（极简，数据+趋势+解读），同行显示
+        # ─────────────────────────────────────────────────────
+        # CPI/PPI：优先使用 LLM 解析，否则规则兜底
+        # ─────────────────────────────────────────────────────
         if cpi is not None or ppi is not None:
             # 环比变化
             cpi_mom = sd.get("cpi_mom")
             ppi_mom = sd.get("ppi_mom")
             
-            # 构建数据部分：CPI+1.3%↑/PPI-0.9% 格式
+            # 构建数据部分
             cpi_arrow = "↑" if cpi_mom and cpi_mom > 0 else ("↓" if cpi_mom and cpi_mom < 0 else "")
             ppi_arrow = "↑" if ppi_mom and ppi_mom > 0 else ("↓" if ppi_mom and ppi_mom < 0 else "")
             
@@ -519,23 +634,32 @@ def _fun_kpi_block(fun_dim: dict) -> str:
                 data_parts.append(f"PPI{ppi:+.1f}%{ppi_arrow}")
             data_str = "/".join(data_parts)
             
-            # 官方解读（浓缩核心）
-            cpi_ppi_interp = fd.get("cpi_ppi_interpretation", {})
+            # 获取解读：优先 LLM，否则规则
             interp_text = ""
+            sentiment = "neutral"
+            cpi_ppi_interp = fd.get("cpi_ppi_interpretation", {})
             if cpi_ppi_interp and cpi_ppi_interp.get("error") is None:
                 interpretation = cpi_ppi_interp.get("interpretation", {})
                 summary = interpretation.get("summary", "") if interpretation else ""
-                if summary:
+                if summary and LLM_INTERPRETER_AVAILABLE:
+                    # 使用 LLM 解析
+                    result = parse_cpi_ppi_interpretation(
+                        summary=summary,
+                        cpi=cpi,
+                        ppi=ppi,
+                        cpi_mom=cpi_mom,
+                        ppi_mom=ppi_mom,
+                        period=sd.get("period")
+                    )
+                    interp_text = result.get("key_trend", "")
+                    sentiment = result.get("sentiment", "neutral")
+                elif summary:
+                    # 规则解析兜底
+                    import re
                     first_sentence = summary.split("。")[0] if "。" in summary else summary
-                    # 提取核心解读（去除具体数值，保留趋势和原因）
-                    # 如："2月份，受春节因素影响，CPI环比上涨1.0%，同比上涨1.3%" → "春节因素影响，CPI环比涨幅创两年新高"
                     if "受" in first_sentence and "影响" in first_sentence:
-                        # 提取原因和关键结论
-                        import re
                         cause_match = re.search(r'受(.+?)影响', first_sentence)
                         cause = cause_match.group(1) if cause_match else ""
-                        
-                        # 提取关键结论关键词
                         if "上涨" in first_sentence or "回升" in first_sentence:
                             if "最高" in first_sentence or "扩大" in first_sentence:
                                 interp_text = f"{cause}：CPI环比涨幅创近两年最高"
@@ -548,18 +672,22 @@ def _fun_kpi_block(fun_dim: dict) -> str:
                         else:
                             interp_text = f"{cause}"
                     else:
-                        # 无法提取则简化
                         interp_text = first_sentence[:40] + "..." if len(first_sentence) > 40 else first_sentence
             
-            # 组装：CPI+1.3%↑/PPI-0.9% 解读
+            # 情绪图标
+            sentiment_icon = {"positive": "🟢", "negative": "🔴"}.get(sentiment, "🟡")
+            
+            # 组装
             if interp_text:
-                lines.append(f"　　{data_str} {interp_text}")
+                lines.append(f"　　{data_str} {interp_text} {sentiment_icon}")
             else:
                 lines.append(f"　　{data_str}")
         
-        # PMI：方案C格式，制造业+非制造业+趋势+解读，同行显示不截断
+        # ─────────────────────────────────────────────────────
+        # PMI：优先使用 LLM 解析，否则规则兜底
+        # ─────────────────────────────────────────────────────
         if pmi is not None or pmi_s is not None:
-            # 计算环比变化
+            # 环比变化
             pmi_mom = sd.get("pmi_mfg_mom")
             pmi_s_mom = sd.get("pmi_svc_mom")
             
@@ -567,37 +695,41 @@ def _fun_kpi_block(fun_dim: dict) -> str:
             mfg_arrow = "↑" if pmi_mom and pmi_mom > 0 else ("↓" if pmi_mom and pmi_mom < 0 else "")
             svc_arrow = "↑" if pmi_s_mom and pmi_s_mom > 0 else ("↓" if pmi_s_mom and pmi_s_mom < 0 else "")
             
-            # 状态标签
-            mfg_status = "扩张" if pmi >= 50.5 else ("临界" if pmi >= 49.5 else "收缩") if pmi else ""
-            svc_status = "扩张" if pmi_s >= 50.5 else ("临界" if pmi_s >= 49.5 else "收缩") if pmi_s else ""
-            
             # 构建数据部分
             data_parts = []
             if pmi is not None:
-                data_parts.append(f"制造业{pmi:.1f}{mfg_arrow}")
+                data_parts.append(f"制造{pmi:.1f}{mfg_arrow}")
             if pmi_s is not None:
-                data_parts.append(f"非制造业{pmi_s:.1f}{svc_arrow}")
+                data_parts.append(f"非制造{pmi_s:.1f}{svc_arrow}")
             data_str = " / ".join(data_parts)
             
-            # 官方解读（浓缩一句，不截断）
-            pmi_interp = fd.get("pmi_interpretation", {})
+            # 获取解读：优先 LLM，否则规则
             interp_text = ""
+            sentiment = "neutral"
+            pmi_interp = fd.get("pmi_interpretation", {})
             if pmi_interp and pmi_interp.get("error") is None:
                 interp = pmi_interp.get("interpretation", {})
                 summary = interp.get("summary", "")
-                if summary:
-                    # 取完整第一句话，不截断
+                if summary and LLM_INTERPRETER_AVAILABLE:
+                    # 使用 LLM 解析
+                    result = parse_pmi_interpretation(
+                        summary=summary,
+                        pmi_mfg=pmi,
+                        pmi_svc=pmi_s,
+                        pmi_mfg_mom=pmi_mom,
+                        pmi_svc_mom=pmi_s_mom,
+                        period=sd.get("period")
+                    )
+                    interp_text = result.get("key_trend", "")
+                    sentiment = result.get("sentiment", "neutral")
+                elif summary:
+                    # 规则解析兜底
+                    import re
                     first_sentence = summary.split("。")[0] if "。" in summary else summary
-                    # 提取核心解读：去除开头的时间/具体数值，保留趋势/原因描述
-                    # 例如："2月份，受春节假期等因素影响，制造业..." → "受春节假期等因素影响，制造业景气回落"
                     if "受" in first_sentence:
-                        # 找到"受X影响"部分
-                        import re
                         match = re.search(r'受(.+?)影响[，\s]', first_sentence)
                         if match:
-                            cause = match.group(1)  # 如"春节假期等因素"
-                            # 提取核心结论（去除具体数值变化描述）
-                            # 包含"下降/上升/回落/回升"等关键词的句子
+                            cause = match.group(1)
                             if "下降" in first_sentence or "回落" in first_sentence:
                                 if "非制造业" in first_sentence and "上升" in first_sentence:
                                     interp_text = f"受{cause}影响，制造业回落但非制造业回暖"
@@ -608,14 +740,16 @@ def _fun_kpi_block(fun_dim: dict) -> str:
                             else:
                                 interp_text = f"受{cause}影响"
                         else:
-                            # 无法提取则保留完整句（截断到合理长度）
                             interp_text = first_sentence[:60] + "..." if len(first_sentence) > 60 else first_sentence
                     else:
                         interp_text = first_sentence
             
-            # 组装：PMI 数据 解读
+            # 情绪图标
+            sentiment_icon = {"positive": "🟢", "negative": "🔴"}.get(sentiment, "🟡")
+            
+            # 组装
             if interp_text:
-                lines.append(f"　　PMI {data_str} {interp_text}")
+                lines.append(f"　　PMI {data_str} {interp_text} {sentiment_icon}")
             else:
                 lines.append(f"　　PMI {data_str}")
 

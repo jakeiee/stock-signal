@@ -7,6 +7,8 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import sys
 
+import pandas as pd
+
 from ..step import Step, StepConfig
 from ..context import ExecutionContext
 

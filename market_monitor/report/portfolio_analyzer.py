@@ -792,11 +792,49 @@ def main():
     md = generate_md_report(results, output_path)
     print(f"\n📄 报告已保存: {output_path}")
 
+    # 创建飞书文档
+    doc_id, doc_url = create_feishu_doc(output_path)
+
     # 发送到飞书
-    send_to_feishu(output_path)
+    send_to_feishu(output_path, doc_url)
 
 
-def send_to_feishu(md_file_path: str):
+def create_feishu_doc(md_file_path: str) -> tuple:
+    """创建飞书文档并返回 (doc_id, doc_url)"""
+    try:
+        import subprocess
+        from market_monitor.config import FEISHU_WEBHOOK
+
+        # 从文件名提取标题
+        title = os.path.basename(md_file_path).replace('.md', '')
+
+        # 调用 lark-cli 创建文档
+        result = subprocess.run(
+            ['lark-cli', 'docs', '+create', '--title', title, '--markdown', f'@{md_file_path}'],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            import json
+            output = json.loads(result.stdout)
+            if output.get('ok'):
+                data = output.get('data', {})
+                doc_id = data.get('doc_id', '')
+                doc_url = data.get('doc_url', '')
+                print(f"✅ 飞书文档已创建: {doc_url}")
+                return doc_id, doc_url
+
+        print(f"⚠ 创建文档失败: {result.stderr}")
+        return None, None
+
+    except Exception as e:
+        print(f"⚠ 创建飞书文档出错: {e}")
+        return None, None
+
+
+def send_to_feishu(md_file_path: str, doc_url: str = None):
     """发送 MD 报告到飞书"""
     try:
         import requests
@@ -811,9 +849,42 @@ def send_to_feishu(md_file_path: str):
             md_content = f.read()
 
         # 限制内容长度（飞书卡片单条消息有限制）
-        max_len = 4000
+        max_len = 3000
         if len(md_content) > max_len:
             md_content = md_content[:max_len] + "\n\n...（内容过长，已截断）"
+
+        # 构建飞书卡片消息
+        elements = []
+
+        # 添加文档链接
+        if doc_url:
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"📄 **飞书文档**: [点击查看完整报告]({doc_url})"
+                }
+            })
+
+        # 添加内容摘要
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": md_content
+            }
+        })
+
+        # 添加时间戳
+        elements.append({
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
+                }
+            ]
+        })
 
         # 构建飞书卡片消息
         payload = {
@@ -829,24 +900,7 @@ def send_to_feishu(md_file_path: str):
                     },
                     "template": "blue"
                 },
-                "elements": [
-                    {
-                        "tag": "div",
-                        "text": {
-                            "tag": "lark_md",
-                            "content": md_content
-                        }
-                    },
-                    {
-                        "tag": "note",
-                        "elements": [
-                            {
-                                "tag": "plain_text",
-                                "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
-                            }
-                        ]
-                    }
-                ]
+                "elements": elements
             }
         }
 

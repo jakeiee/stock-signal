@@ -1,0 +1,14 @@
+{
+  "cpi_ppi_2026_04": {
+    "month": "2026_04",
+    "result": {
+      "summary_short": "CPI-0.1%↓/PPI-2.5%↑ CPI环比降0.1%，同比降0.1%",
+      "key_trend": [
+        "价格持平偏弱",
+        "需求温和恢复"
+      ],
+      "sentiment": "neutral"
+    },
+    "cached_at": "2026-04-19T21:30:51.482208"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "index_code": "000985",
+  "index_name": "万得全A（除金融石油石化）",
+  "record_date": "2026-04-18",
+  "record_source": "Wind APP手机记录",
+  "record_timestamp": "2026-04-18 18:49+08:00",
+  "historical_period": "发布以来（2006-01-04至今20.3年）",
+
+  "valuation_data": {
+    "PE_TTM": {
+      "value": 43.03,
+      "percentile": 72.93,
+      "unit": "倍"
+    },
+    "dividend_yield": {
+      "value": 1.35,
+      "percentile": 65.39,
+      "unit": "%"
+    }
+  },
+
+  "data_quality_check": {
+    "historical_period_years": 20.3,
+    "data_completeness": "完整历史数据",
+    "data_source_reliability": "Wind APP - 专业金融数据",
+    "timestamp_consistency": "日度数据",
+    "quality_grade": "A级（专业源完整历史）"
+  },
+
+  "analysis_notes": "PE 43.03倍处于历史72.93%分位，估值偏高。股息率1.35%处于历史65.39%分位，偏低。"
+}

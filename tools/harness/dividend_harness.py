@@ -19,7 +19,7 @@ class FetchBondYieldStep(Step):
     """
     获取国债收益率数据步骤
 
-    从 Wind 或本地文件获取国债收益率数据。
+    从 Wind APP 记录数据或本地缓存获取国债收益率数据。
     """
 
     name = "fetch_bond_yield"
@@ -33,18 +33,33 @@ class FetchBondYieldStep(Step):
 
     def execute(self, context: ExecutionContext) -> Dict[str, Any]:
         """获取国债收益率数据"""
+        import json
+        from pathlib import Path
+
         try:
-            from dividend_monitor.data_sources.wind_app import WindAppDataSource
+            # 优先从 Wind APP 估值缓存获取
+            cache_path = Path("/Users/liuyi/WorkBuddy/stock-signal/dividend_monitor/valuation_cache.json")
+            if cache_path.exists():
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    cache = json.load(f)
+                # 尝试获取无风险利率
+                for key, val in cache.items():
+                    if isinstance(val, dict) and "risk_free_rate" in val:
+                        data = {"risk_free_rate": val["risk_free_rate"], "source": "wind_app_cache"}
+                        context.set(self.data_key, data)
+                        return data
 
-            source = WindAppDataSource()
-            data = source.get_bond_yield_data()
-
+            # 回退到默认值
+            data = {"risk_free_rate": 1.8, "source": "default"}
             context.set(self.data_key, data)
             return data
 
         except Exception as e:
             context.error(f"Failed to fetch bond yield: {str(e)}")
-            raise
+            # 使用默认值而不是抛出异常
+            data = {"risk_free_rate": 1.8, "source": "default"}
+            context.set(self.data_key, data)
+            return data
 
 
 class ValuationDataStep(Step):
@@ -105,13 +120,22 @@ class KDJSignalStep(Step):
     def execute(self, context: ExecutionContext) -> Dict[str, Any]:
         """计算 KDJ 信号"""
         try:
-            from dividend_monitor.analysis.kdj import analyze_kdj
+            from dividend_monitor.analysis.kdj import _calc_kdj_from_df
 
             # 获取价格数据
             price_data = context.get("price_data")
             if price_data and "price" in price_data:
                 df = price_data["price"]
-                result = analyze_kdj(df)
+                kdj_result = _calc_kdj_from_df(df)
+                if kdj_result:
+                    result = {
+                        "signal": kdj_result.get("signal", "hold"),
+                        "K": kdj_result.get("K"),
+                        "D": kdj_result.get("D"),
+                        "J": kdj_result.get("J"),
+                    }
+                else:
+                    result = {"signal": "hold", "reason": "KDJ calculation returned None"}
             else:
                 result = {"signal": "hold", "reason": "No price data available"}
 

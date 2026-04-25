@@ -107,34 +107,102 @@ def _csindex_ohlcv(csindex_code: str = "000985", days: int = 30) -> pd.DataFrame
         return pd.DataFrame()
 
 
+def _xalpha_volume_turnover(xalpha_code: str, days: int = 5) -> float:
+    """使用xalpha获取指数成交量，并估算成交额（亿元）。
+    
+    指数volume单位是股数，成交额 = 成交量 × 均价 / 100000000
+    均价通过指数收盘价与基准比例估算
+    """
+    try:
+        import xalpha as xa
+        info = xa.indexinfo(code=xalpha_code)
+        if info.price is None or len(info.price) < 1:
+            return None
+        latest = info.price.iloc[-1]
+        volume_shares = float(latest.get("volume", 0))  # 股数
+        
+        # 指数点位约等于均价的1000倍(粗略估算)
+        # 成交额(亿元) = 成交量(股) × 均价(元) / 1亿
+        # 均价 ≈ 指数点位 / 1000 (简化估算)
+        close_price = float(latest.get("close", 0))
+        if close_price <= 0:
+            return None
+        
+        # 简化估算：成交额 ≈ 成交量 × (收盘价/1000) / 1亿
+        # 但更准确的是用比例因子
+        avg_price_factor = close_price / 1000  # 均价估算
+        turnover = volume_shares * avg_price_factor / 100000000
+        return turnover
+    except Exception:
+        return None
+
+
 def fetch_turnover() -> Dict[str, Any]:
-    """获取全市场成交额（最近交易日 + 前一交易日）。支持CSV缓存降级。"""
+    """获取全市场成交额（最近交易日 + 前一交易日）。支持CSV缓存降级。
+    
+    改进：分别获取沪市、深市、京市成交额
+    """
     # 1. 优先调用API
     try:
+        # 获取中证全指（上证+深证+北证）
         df = _csindex_ohlcv("000985", days=15)
         if df.empty or len(df) < 2:
             raise ValueError("中证全指接口无数据")
 
         latest = df.iloc[-1]
         prev = df.iloc[-2]
+        date_str = latest["date"]
 
         chg = None
         if prev["turnover"] > 0:
             chg = round((latest["turnover"] - prev["turnover"]) / prev["turnover"] * 100, 2)
 
+        # 获取各市场成交额
+        sh_turnover = None  # 上证
+        sz_turnover = None  # 深证
+        bj_turnover = None  # 北证
+
+        try:
+            # 上证指数
+            df_sh = _csindex_ohlcv("000001", days=5)
+            if not df_sh.empty:
+                latest_sh = df_sh[df_sh["date"] == date_str]
+                if not latest_sh.empty:
+                    sh_turnover = latest_sh.iloc[0]["turnover"]
+
+            # 北证50
+            df_bj = _csindex_ohlcv("899050", days=5)
+            if not df_bj.empty:
+                latest_bj = df_bj[df_bj["date"] == date_str]
+                if not latest_bj.empty:
+                    bj_turnover = latest_bj.iloc[0]["turnover"]
+
+            # 深证：从中证全指减去上证和北证
+            if sh_turnover is not None and bj_turnover is not None:
+                sz_turnover = round(latest["turnover"] - sh_turnover - bj_turnover, 2)
+        except Exception:
+            pass
+
         result = {
             "turnover":      latest["turnover"],
             "turnover_prev": prev["turnover"],
             "chg_pct":       chg,
-            "date":          latest["date"],
+            "date":          date_str,
             "source":        "api",
+            # 各市场成交额
+            "sh_turnover":   sh_turnover,
+            "sz_turnover":   sz_turnover,
+            "bj_turnover":   bj_turnover,
         }
 
         # 保存到CSV缓存
         _append_csv("turnover.csv", {
-            "date":    latest["date"],
-            "turnover": latest["turnover"],
-            "source":  "csindex",
+            "date":          date_str,
+            "turnover":      latest["turnover"],
+            "sh_turnover":   sh_turnover,
+            "sz_turnover":   sz_turnover,
+            "bj_turnover":   bj_turnover,
+            "source":        "csindex+xalpha",
         })
 
         return {
@@ -162,6 +230,9 @@ def fetch_turnover() -> Dict[str, Any]:
                 "chg_pct":       chg,
                 "date":          latest["date"],
                 "source":        "csv_cache",
+                "sh_turnover":   latest.get("sh_turnover"),
+                "sz_turnover":   latest.get("sz_turnover"),
+                "bj_turnover":   latest.get("bj_turnover"),
             },
             "error": f"降级读取缓存（API: {e}）",
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -239,15 +310,16 @@ def fetch_margin(override: Optional[Dict] = None) -> Dict[str, Any]:
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
 
-    # 1. 优先调用东方财富API
+    # 1. 优先调用东方财富融资交易额接口（RPTA_WEB_MARGIN_DAILYTRADE）
+    # 该接口返回：融资/融券余额、交易额、占成交额比例等完整数据
     try:
         import time
         ts = int(time.time() * 1000)
-        url = f"https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_RZRQ_LSHJ&columns=ALL&source=WEB&sortColumns=dim_date&sortTypes=-1&pageNumber=1&pageSize=1&filter=&_={ts}"
+        url = f"https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_MARGIN_DAILYTRADE&columns=ALL&source=WEB&sortColumns=STATISTICS_DATE&sortTypes=-1&pageNumber=1&pageSize=1&_={ts}"
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Referer": "https://data.eastmoney.com/rzrq/total.html",
+            "Referer": "https://data.eastmoney.com/rzrq/zhtjday.html",
         }
 
         resp = requests.get(url, headers=headers, timeout=15)
@@ -258,47 +330,57 @@ def fetch_margin(override: Optional[Dict] = None) -> Dict[str, Any]:
             if records:
                 r = records[0]
                 # 转换日期格式
-                raw_date = r.get("DIM_DATE", "")
+                raw_date = r.get("STATISTICS_DATE", "")
                 date_str = ""
                 if raw_date:
                     date_str = pd.to_datetime(str(raw_date)).strftime("%Y-%m-%d")
 
-                # 两融余额（元 → 亿元）
-                rzrqye = float(r.get("RZRQYE", 0)) / 100000000
-                # 融资余额
-                rzye = float(r.get("RZYE", 0)) / 100000000 if r.get("RZYE") else None
-                # 融券余额
-                rqye = float(r.get("RQYE", 0)) / 100000000 if r.get("RQYE") else None
-                # 融资净买入
-                rz_net = float(r.get("RZJMG", 0)) / 100000000 if r.get("RZJMG") else None
-                # 融资买入额
-                rz_buy = float(r.get("RZJME", 0)) / 100000000 if r.get("RZJME") else None
-                # 融券卖出额（RQMCE：元 → 亿元）
-                rqmc = float(r.get("RQMCE", 0)) / 100000000 if r.get("RQMCE") else None
+                # 融资余额（亿元，直接来自接口）
+                rzye = float(r.get("FIN_BALANCE")) if r.get("FIN_BALANCE") else None
+                # 融券余额（亿元）
+                rqye = float(r.get("LOAN_BALANCE")) if r.get("LOAN_BALANCE") else None
+                # 两融余额（亿元）
+                total_bal = float(r.get("MARGIN_BALANCE")) if r.get("MARGIN_BALANCE") else None
+                # 两融余额占A股流通市值比例（%，直接来自接口）
+                rz_yezb = float(r.get("BALANCE_RATIO")) if r.get("BALANCE_RATIO") else None
+                # 融资买入额（亿元）
+                rz_buy = float(r.get("FIN_BUY_AMT")) if r.get("FIN_BUY_AMT") else None
+                # 融资卖出额（亿元）
+                loan_sell_amt = float(r.get("LOAN_SELL_AMT")) if r.get("LOAN_SELL_AMT") else None
+                # 两融交易额（亿元）
+                rz_trade_amt = float(r.get("MARGIN_TRADE_AMT")) if r.get("MARGIN_TRADE_AMT") else None
+                # 两融交易额占A股成交额比例（%，直接来自接口）
+                rz_turnover_ratio = float(r.get("TRADE_AMT_RATIO")) if r.get("TRADE_AMT_RATIO") else None
 
                 result = {
-                    "date":           date_str,
-                    "rz_net":         rz_net,
-                    "bal_chg":        None,
-                    "rz_bal":         rzye,
-                    "rq_bal":         rqye,
-                    "total_bal":      rzrqye,
-                    "rz_buy":         rz_buy,
-                    "rq_sell":        rqmc,
-                    "mkt_turnover":   None,
-                    "source":         "api",
+                    "date":              date_str,
+                    "rz_net":            None,          # 融资净买入（该接口不提供）
+                    "bal_chg":           None,
+                    "rz_bal":            rzye,
+                    "rq_bal":            rqye,
+                    "total_bal":         total_bal,
+                    "rz_buy":            rz_buy,
+                    "loan_sell_amt":     loan_sell_amt,
+                    "rz_trade_amt":      rz_trade_amt,
+                    "rz_yezb":           rz_yezb,        # 两融余额占A股流通市值比例
+                    "mkt_turnover":      None,
+                    "rz_turnover_ratio": rz_turnover_ratio,  # 两融交易额占A股成交额比例
+                    "source":            "api",
                 }
 
                 # 保存到CSV缓存
                 _append_csv("margin.csv", {
-                    "date":         date_str,
-                    "rz_bal":       rzye,
-                    "rq_bal":       rqye,
-                    "total_bal":    rzrqye,
-                    "rz_net":       rz_net,
-                    "rz_buy":       rz_buy,
-                    "rq_sell":      rqmc,
-                    "source":        "eastmoney",
+                    "date":              date_str,
+                    "rz_bal":            rzye,
+                    "rq_bal":            rqye,
+                    "total_bal":         total_bal,
+                    "rz_net":            None,
+                    "rz_buy":            rz_buy,
+                    "loan_sell_amt":     loan_sell_amt,
+                    "rz_trade_amt":      rz_trade_amt,
+                    "rz_yezb":           rz_yezb,
+                    "rz_turnover_ratio": rz_turnover_ratio,
+                    "source":            "eastmoney",
                 })
 
                 return {
@@ -318,24 +400,150 @@ def fetch_margin(override: Optional[Dict] = None) -> Dict[str, Any]:
         latest = df_cache.iloc[-1]
         return {
             "data": {
-                "date":           latest.get("date", ""),
-                "rz_net":         float(latest.get("rz_net")) if latest.get("rz_net") else None,
-                "bal_chg":        None,
-                "rz_bal":         float(latest.get("rz_bal")) if latest.get("rz_bal") else None,
-                "rq_bal":         float(latest.get("rq_bal")) if latest.get("rq_bal") else None,
-                "total_bal":      float(latest.get("total_bal")) if latest.get("total_bal") else None,
-                "rz_buy":         float(latest.get("rz_buy")) if latest.get("rz_buy") else None,
-                "rq_sell":        float(latest.get("rq_sell")) if latest.get("rq_sell") else None,
-                "mkt_turnover":   None,
-                "source":          "csv_cache",
+                "date":              latest.get("date", ""),
+                "rz_net":            float(latest.get("rz_net")) if latest.get("rz_net") else None,
+                "bal_chg":           None,
+                "rz_bal":            float(latest.get("rz_bal")) if latest.get("rz_bal") else None,
+                "rq_bal":            float(latest.get("rq_bal")) if latest.get("rq_bal") else None,
+                "total_bal":         float(latest.get("total_bal")) if latest.get("total_bal") else None,
+                "rz_buy":            float(latest.get("rz_buy")) if latest.get("rz_buy") else None,
+                "loan_sell_amt":     float(latest.get("loan_sell_amt")) if latest.get("loan_sell_amt") else None,
+                "rz_trade_amt":      float(latest.get("rz_trade_amt")) if latest.get("rz_trade_amt") else None,
+                "rz_yezb":           float(latest.get("rz_yezb")) if latest.get("rz_yezb") else None,
+                "mkt_turnover":      None,
+                "rz_turnover_ratio": float(latest.get("rz_turnover_ratio")) if latest.get("rz_turnover_ratio") else None,
+                "source":            "csv_cache",
             },
-            "error": f"降级读取缓存（API: {e}）",
+                "error": f"降级读取缓存（API: {e}）",
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
 
 
+def fetch_margin_history(n: int = 30) -> pd.DataFrame:
+    """获取最近n天的两融历史数据，用于趋势分析。"""
+    df = _load_csv("margin.csv")
+    if df.empty or len(df) < 5:
+        # 尝试调用API获取更多历史数据
+        try:
+            import time
+            ts = int(time.time() * 1000)
+            url = f"https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_MARGIN_DAILYTRADE&columns=ALL&source=WEB&sortColumns=STATISTICS_DATE&sortTypes=-1&pageNumber=1&pageSize={n}&_={ts}"
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Referer": "https://data.eastmoney.com/rzrq/zhtjday.html",
+            }
+
+            resp = requests.get(url, headers=headers, timeout=15)
+            data = resp.json()
+
+            if data.get("success") and data.get("result"):
+                records = data["result"].get("data", [])
+                rows = []
+                for r in records:
+                    raw_date = r.get("STATISTICS_DATE", "")
+                    if raw_date:
+                        date_str = pd.to_datetime(str(raw_date)).strftime("%Y-%m-%d")
+                        rows.append({
+                            "date": date_str,
+                            "rz_bal": float(r.get("FIN_BALANCE")) if r.get("FIN_BALANCE") else None,
+                            "rq_bal": float(r.get("LOAN_BALANCE")) if r.get("LOAN_BALANCE") else None,
+                            "total_bal": float(r.get("MARGIN_BALANCE")) if r.get("MARGIN_BALANCE") else None,
+                            "rz_yezb": float(r.get("BALANCE_RATIO")) if r.get("BALANCE_RATIO") else None,
+                            "rz_trade_amt": float(r.get("MARGIN_TRADE_AMT")) if r.get("MARGIN_TRADE_AMT") else None,
+                            "rz_turnover_ratio": float(r.get("TRADE_AMT_RATIO")) if r.get("TRADE_AMT_RATIO") else None,
+                        })
+                df = pd.DataFrame(rows)
+        except Exception:
+            pass
+
+    if df.empty or len(df) < 5:
+        return pd.DataFrame()
+
+    # 确保按日期排序
+    df = df.sort_values("date", ascending=False).reset_index(drop=True)
+    return df.head(n)
+
+
+def analyze_margin_trend(history: pd.DataFrame, window: int = 10) -> Dict[str, Any]:
+    """分析两融趋势，检测警示信号。
+    
+    警示条件：两融余额占流通市值比例超过3% 且 两融交易额占成交额比例见顶后快速下降
+    """
+    if history.empty or len(history) < window:
+        return {"warning": False, "reason": ""}
+
+    result = {"warning": False, "reason": "", "trend": {}}
+
+    # 提取最近的数据
+    latest = history.iloc[0]
+    prev_window = history.head(window)
+
+    # 1. 检查两融余额占流通市值比例
+    rz_yezb = latest.get("rz_yezb")
+    if rz_yezb is None:
+        return result
+
+    # 2. 检查两融交易额占成交额比例趋势
+    rz_turnover_ratios = prev_window["rz_turnover_ratio"].dropna().tolist()
+    if len(rz_turnover_ratios) < 3:
+        return result
+
+    # 计算比例变化趋势
+    recent_avg = sum(rz_turnover_ratios[:3]) / 3
+    older_avg = sum(rz_turnover_ratios[3:6]) / 3 if len(rz_turnover_ratios) >= 6 else recent_avg
+
+    # 检测警示信号
+    warning_flag = False
+    warning_reason = ""
+
+    # 条件1: 两融余额占比 > 3%
+    if rz_yezb > 3.0:
+        # 条件2: 两融交易额占比见顶后下降（近期均值 < 早期均值 - 0.5%）
+        if older_avg > recent_avg + 0.5:
+            warning_flag = True
+            warning_reason = (
+                f"两融余额占流通市值{rz_yezb:.2f}%，超过3%警戒线；"
+                f"两融交易额占比从{older_avg:.2f}%降至{recent_avg:.2f}%，呈下降趋势"
+            )
+        elif rz_turnover_ratios[0] < rz_turnover_ratios[1] < rz_turnover_ratios[2]:
+            # 连续下降
+            warning_flag = True
+            warning_reason = (
+                f"两融余额占流通市值{rz_yezb:.2f}%，超过3%警戒线；"
+                f"两融交易额占比连续下降({rz_turnover_ratios[2]:.2f}%→{rz_turnover_ratios[1]:.2f}%→{rz_turnover_ratios[0]:.2f}%)"
+            )
+
+    # 趋势描述
+    if older_avg > recent_avg + 0.3:
+        trend_desc = "下降趋势"
+    elif older_avg < recent_avg - 0.3:
+        trend_desc = "上升趋势"
+    else:
+        trend_desc = "相对平稳"
+
+    result["warning"] = warning_flag
+    result["reason"] = warning_reason
+    result["trend"] = {
+        "rz_yezb": rz_yezb,
+        "rz_turnover_ratio_latest": rz_turnover_ratios[0],
+        "rz_turnover_ratio_recent_avg": recent_avg,
+        "rz_turnover_ratio_older_avg": older_avg,
+        "trend_desc": trend_desc,
+    }
+
+    return result
+
+
 def fetch_znz_active_cap() -> Dict[str, Any]:
-    """获取指南针活跃市值。从CSV缓存读取。"""
+    """获取指南针活跃市值。从CSV缓存读取。
+    
+    入场/持有/离场周期判断逻辑：
+    - 大于4%：入场信号
+    - 小于-2.3%：离场信号
+    - 上一个明显信号为入场 → 多头区间
+    - 上一个明显信号为离场 → 空头区间
+    """
     try:
         df_cache = _load_csv("znz_active_cap.csv")
         if df_cache.empty:
@@ -353,7 +561,51 @@ def fetch_znz_active_cap() -> Dict[str, Any]:
         if prev["active_cap"] > 0:
             mom_pct = round((latest["active_cap"] - prev["active_cap"]) / prev["active_cap"] * 100, 2)
 
-        # 信号描述
+        # 当前涨跌幅
+        chg_pct = float(latest["chg_pct"]) if latest.get("chg_pct") else None
+
+        # 入场/持有/离场周期判断
+        # 查找最近一个明显信号（从最新数据往前找）
+        last_clear_signal = None
+        last_clear_signal_date = None
+        for idx in range(len(df_cache) - 1, -1, -1):
+            row = df_cache.iloc[idx]
+            cap_chg = float(row["chg_pct"]) if row.get("chg_pct") else None
+            if cap_chg is None:
+                continue
+            if cap_chg >= 4.0:
+                last_clear_signal = "entry"  # 入场
+                last_clear_signal_date = row["date"]
+                break
+            elif cap_chg <= -2.3:
+                last_clear_signal = "exit"  # 离场
+                last_clear_signal_date = row["date"]
+                break
+
+        # 判断当前区间类型
+        if last_clear_signal == "entry":
+            zone_type = "bullish"  # 多头区间
+            zone_desc = "多头区间"
+        elif last_clear_signal == "exit":
+            zone_type = "bearish"  # 空头区间
+            zone_desc = "空头区间"
+
+        # 当前信号判断
+        if chg_pct is not None:
+            if chg_pct >= 4.0:
+                current_signal = "entry"
+                current_signal_desc = "入场信号"
+            elif chg_pct <= -2.3:
+                current_signal = "exit"
+                current_signal_desc = "离场信号"
+            else:
+                current_signal = "holding"
+                current_signal_desc = f"持有中({zone_desc})"
+        else:
+            current_signal = "neutral"
+            current_signal_desc = "观望"
+
+        # 原始信号描述（兼容旧逻辑）
         signal_map = {
             "exit": "离场信号",
             "neutral": "中性",
@@ -362,15 +614,29 @@ def fetch_znz_active_cap() -> Dict[str, Any]:
         }
         signal_desc = signal_map.get(str(latest.get("signal", "")), latest.get("signal", ""))
 
+        # 打印活跃市值数据（供调试/检查空头区间）
+        print(f"[DEBUG] 活跃市值数据: 日期={latest['date']}, 市值={latest['active_cap']/10000:.2f}万亿, "
+              f"涨跌幅={chg_pct:+.2f}%, 区间类型={zone_type}({zone_desc}), "
+              f"上次信号={'入场' if last_clear_signal == 'entry' else '离场' if last_clear_signal == 'exit' else '无'}={last_clear_signal_date}")
+
         return {
             "data": {
-                "date":          latest["date"],
-                "active_cap":    latest["active_cap"],
-                "chg_pct":       float(latest["chg_pct"]) if latest.get("chg_pct") else None,
-                "mom_pct":       mom_pct,
-                "signal":        latest.get("signal", ""),
-                "signal_desc":   signal_desc,
-                "source":        "csv_cache",
+                "date": latest["date"],
+                "active_cap": latest["active_cap"],
+                "chg_pct": chg_pct,
+                "mom_pct": mom_pct,
+                "signal": latest.get("signal", ""),
+                "signal_desc": signal_desc,
+                "source": "csv_cache",
+                # 新增：入场/持有/离场周期
+                "current_signal": current_signal,
+                "current_signal_desc": current_signal_desc,
+                "zone_type": zone_type,
+                "zone_desc": zone_desc,
+                "last_clear_signal": last_clear_signal,
+                "last_clear_signal_date": last_clear_signal_date,
+                "entry_threshold": 4.0,
+                "exit_threshold": -2.3,
             },
             "error": None,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),

@@ -4,7 +4,7 @@ Harness 核心引擎
 统一编排步骤执行，管理执行流程。
 """
 
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 import logging
 
 from .context import ExecutionContext, ExecutionStatus, StepResult

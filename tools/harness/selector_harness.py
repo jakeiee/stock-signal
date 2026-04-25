@@ -105,6 +105,9 @@ class PreFilterStep(Step):
         )
         self.etf_filter = etf_filter
     
+    def validate(self) -> bool:
+        return True
+    
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             print("[预筛选] 开始ETF初筛...")
@@ -166,6 +169,9 @@ class TrendFilterStep(Step):
         )
         self.trend_filter = trend_filter
         self.max_batch = max_batch
+    
+    def validate(self) -> bool:
+        return True
     
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
@@ -235,6 +241,9 @@ class QuickScreenStep(Step):
         )
         self.strategy = strategy
     
+    def validate(self) -> bool:
+        return True
+    
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             print(f"[快速筛选] 使用策略: {self.strategy}")
@@ -269,6 +278,9 @@ class TerminalOutputStep(Step):
             description="终端输出选股结果"
         )
     
+    def validate(self) -> bool:
+        return True
+    
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
             result = ctx.get("selector_result", {})
@@ -300,6 +312,9 @@ class FeishuPushStep(Step):
             description="推送选股结果到飞书"
         )
         self.report_key = report_key
+    
+    def validate(self) -> bool:
+        return True
     
     def execute(self, ctx: ExecutionContext) -> StepResult:
         try:
