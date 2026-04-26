@@ -10,5 +10,41 @@
       "sentiment": "neutral"
     },
     "cached_at": "2026-04-19T21:30:51.482208"
+  },
+  "gdp_2026Q1": {
+    "month": "2026_04",
+    "result": {
+      "summary_short": "GDP同比+5.0% GDP达140万亿元，增长5.0%",
+      "key_trend": [
+        "总量突破",
+        "稳速增长"
+      ],
+      "sentiment": "positive"
+    },
+    "cached_at": "2026-04-25T14:44:59.634637"
+  },
+  "cpi_ppi_2026_03": {
+    "month": "2026_04",
+    "result": {
+      "summary_short": "CPI+1.0%↓/PPI+0.5% CPI同比涨1.0%，PPI同比涨0.5%",
+      "key_trend": [
+        "价格温和回升",
+        "工业通胀抬头"
+      ],
+      "sentiment": "neutral"
+    },
+    "cached_at": "2026-04-25T14:45:01.172804"
+  },
+  "pmi_2026_03": {
+    "month": "2026_04",
+    "result": {
+      "summary_short": "PMI 制造PMI50.4 / 非制造PMI50.1 3月制造业PMI升至50.4%，重回扩张区间",
+      "key_trend": [
+        "景气回升",
+        "重返扩张"
+      ],
+      "sentiment": "positive"
+    },
+    "cached_at": "2026-04-25T14:45:02.805766"
   }
 }

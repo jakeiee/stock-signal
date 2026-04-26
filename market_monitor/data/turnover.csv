@@ -1,2 +1,3 @@
-date,turnover,source
-2026-04-17,23859.38,csindex
+date,turnover,source,sh_turnover,sz_turnover,bj_turnover
+2026-04-17,23859.38,csindex,,,
+2026-04-24,25851.2,csindex+xalpha,11430.0,14259.9,161.3
