@@ -27,6 +27,7 @@ stock-signal/
 │
 ├── dividend_monitor/         # 红利指数监控模块
 │   ├── main.py               # 主入口（红利指数报告）
+│   ├── send_dividend_report_to_feishu.py  # 备用：直接发送红利日报
 │   ├── config.py              # 指数配置
 │   ├── data_sources/          # 数据源
 │   │   ├── bond.py           # 国债收益率
@@ -39,8 +40,9 @@ stock-signal/
 │       ├── terminal.py       # 终端输出
 │       └── feishu.py         # 飞书推送
 │
-├── positions.json            # 持仓数据（手动维护）
-├── trading_log.csv           # 交易记录（CSV格式）
+├── data/                     # 个人数据目录
+│   ├── positions.json        # 持仓数据（手动维护）
+│   └── trading_log.csv       # 交易记录（CSV格式）
 └── tools/                    # 工具脚本
     └── self_improvement_integration.py  # 自我改进学习系统
 ```
@@ -113,7 +115,7 @@ python3 -m market_monitor.report.portfolio_feishu_doc --mode mermaid
 
 ## 持仓管理
 
-### positions.json
+### data/positions.json
 
 手动维护当前持仓，包含：ETF代码、名称、数量、成本价、现价。
 
@@ -130,7 +132,7 @@ python3 -m market_monitor.report.portfolio_feishu_doc --mode mermaid
 ]
 ```
 
-### trading_log.csv
+### data/trading_log.csv
 
 记录所有交易操作（买入/卖出），格式：
 
@@ -139,7 +141,7 @@ date,etf_code,etf_name,action,shares,price,amount,note
 2026-04-26,513020,港股通创新药ETF,买入,1000,1.29,1290,新增买入
 ```
 
-记录交易后会自动同步到 `positions.json`。
+记录交易后会自动同步到 `data/positions.json`。
 
 ---
 
@@ -194,13 +196,12 @@ date,etf_code,etf_name,action,shares,price,amount,note
 
 | 文件 | 说明 |
 |:---|:---|
-| `positions.json` | 当前持仓数据 |
-| `trading_log.csv` | 交易记录 |
-| `valuation_cache.json` | 估值数据缓存 |
+| `data/positions.json` | 当前持仓数据 |
+| `data/trading_log.csv` | 交易记录 |
 | `market_monitor/data/` | 资金面数据、北向资金等 |
 | `dividend_monitor/dividend_index_valuation.csv` | 红利指数估值数据 |
-| `portfolio_report_*.md` | 历史持仓分析报告 |
-| `feishu_portfolio_report_v*.xml` | 飞书文档模板 |
+| `wind_app_recorded_data/` | Wind App 录制数据 |
+| `protected_data_sources/` | 保护的数据源 |
 
 ---
 

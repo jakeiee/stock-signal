@@ -147,7 +147,7 @@ def _fetch_from_eastmoney() -> List[Dict]:
 
 # ── 配置文件方式 ─────────────────────────────────────────────────────────────
 
-def load_positions_from_file(filepath: str = "positions.json") -> List[Dict]:
+def load_positions_from_file(filepath: str = "data/positions.json") -> List[Dict]:
     """
     从配置文件加载持仓列表。
     
@@ -160,7 +160,7 @@ def load_positions_from_file(filepath: str = "positions.json") -> List[Dict]:
     # 尝试多个可能的位置
     possible_paths = [
         filepath,
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "positions.json"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "positions.json"),
         os.path.join(os.path.expanduser("~"), ".stock-signal", "positions.json"),
     ]
     

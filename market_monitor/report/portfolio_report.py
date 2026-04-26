@@ -361,8 +361,8 @@ def generate_detailed_report(etf_analysis: List[Dict], output_path: str = None) 
 
 def main():
     parser = argparse.ArgumentParser(description="生成持仓ETF详细分析报告")
-    parser.add_argument("--positions-file", "-p", default="./positions.json",
-                        help="持仓配置文件路径 (默认: ./positions.json)")
+    parser.add_argument("--positions-file", "-p", default="data/positions.json",
+                        help="持仓配置文件路径 (默认: data/positions.json)")
     parser.add_argument("--output", "-o", default=None,
                         help="输出文件路径 (默认: 自动生成)")
 

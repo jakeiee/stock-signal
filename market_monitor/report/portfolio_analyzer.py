@@ -1406,7 +1406,7 @@ def main():
     parser.add_argument("--mode", "-m", default="compact",
                         choices=["compact", "classic", "card", "chart", "radar", "matrix"],
                         help="报告模式: compact(精简) | classic(经典详表) | card(卡片式) | chart(图表可视化) | radar(多维雷达) | matrix(对比矩阵)")
-    parser.add_argument("--positions", "-p", default="./positions.json",
+    parser.add_argument("--positions", "-p", default="data/positions.json",
                         help="持仓配置文件路径")
     parser.add_argument("--output", "-o", default=None,
                         help="输出文件路径")

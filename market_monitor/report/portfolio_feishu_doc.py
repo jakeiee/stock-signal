@@ -728,7 +728,7 @@ def main():
     parser.add_argument("--mode", "-m", default="hybrid",
                         choices=["xml", "sheet", "mermaid", "hybrid"],
                         help="文档模式: xml(原生组件) | sheet(嵌入表格) | mermaid(图表) | hybrid(综合)")
-    parser.add_argument("--positions", "-p", default="./positions.json",
+    parser.add_argument("--positions", "-p", default="data/positions.json",
                         help="持仓配置文件路径")
     args = parser.parse_args()
 

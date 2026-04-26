@@ -44,7 +44,7 @@ from market_monitor.report.portfolio_analyzer import (
 class LoadPositionsStep(Step):
     """Step 1: 加载持仓数据"""
     
-    def __init__(self, positions_file: str = "./positions.json"):
+    def __init__(self, positions_file: str = "data/positions.json"):
         super().__init__()
         self.name = "load_positions"
         self.positions_file = positions_file
@@ -377,7 +377,7 @@ class TerminalOutputStep(Step):
 # ── Harness 工厂 ───────────────────────────────────────────────────────────────
 
 def create_portfolio_harness(
-    positions_file: str = "./positions.json",
+    positions_file: str = "data/positions.json",
     output_dir: str = ".",
     feishu: bool = False
 ) -> Harness:
@@ -398,7 +398,7 @@ def create_portfolio_harness(
 
 
 def run_portfolio_analysis(
-    positions_file: str = "./positions.json",
+    positions_file: str = "data/positions.json",
     output_dir: str = ".",
     feishu: bool = False
 ) -> ExecutionContext:
@@ -427,7 +427,7 @@ def run_portfolio_analysis(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="持仓分析 Harness")
-    parser.add_argument("--positions", "-p", default="./positions.json",
+    parser.add_argument("--positions", "-p", default="data/positions.json",
                        help="持仓文件路径")
     parser.add_argument("--output", "-o", default=".",
                        help="输出目录")
