@@ -356,7 +356,14 @@ def main() -> None:
     # ── Step 3: 政策面 ────────────────────────────────────────────────────────
     print("  [3/4] 政策面...", end=" ", flush=True)
     policy_data = policy.fetch_policy_events()
-    print("完成（占位）")
+    if "error" not in policy_data:
+        mon = policy_data.get("data", {}).get("monetary", {})
+        if mon:
+            print(f"✓ M2 {mon.get('m2_yoy')}%, 国债 {mon.get('bond_10y')}%")
+        else:
+            print("完成（无数据）")
+    else:
+        print(f"✗ {policy_data.get('error', '获取失败')}")
 
     # ── Step 4: 全球市场 ──────────────────────────────────────────────────────
     print("  [4/4] 全球市场...")

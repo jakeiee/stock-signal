@@ -391,351 +391,40 @@ INDICATOR_GUIDE = """
 ---
 """
 
+# ── 向后兼容别名 ─────────────────────────────────────────────────────────────
 def generate_md_report(results: List[Dict], output_path: str = None) -> str:
-    """生成 Markdown 报告"""
-    beijing_tz = timezone(timedelta(hours=8))
-    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
-    total = len(results)
-    avg_score = sum(r.get("pattern_score", 0) for r in results) / total if total else 0
+    """生成专业版 Markdown 持仓分析报告（向后兼容别名，调用精简模式）"""
+    return generate_report(results, mode="compact", output_path=output_path)
 
-    # 按新信号分类
-    strong_signals = [r for r in results if r.get("signal") == "STRONG"]
-    watch_signals = [r for r in results if r.get("signal") == "WATCH"]
-    danger_signals = [r for r in results if r.get("signal") == "DANGER"]
-    oversold = [r for r in results if r.get("rsi14", 50) < 35]
 
-    lines = []
-    lines.append("# 📊 持仓ETF详细分析报告")
-    lines.append(f"\n**报告生成时间**: {now}\n")
-    lines.append("---\n")
+# ── 多模式报告生成 ──────────────────────────────────────────────────────────
 
-    # 0. 综合建议（放在开头）- 分层判断法
-    # 第一层：知行信号为首要
-    # 第二层：RSI + KDJ + MACD 交叉验证
-    # 第三层：量价配合 + 位置确认
+def generate_report(results: List[Dict], mode: str = "compact", output_path: str = None) -> str:
+    """
+    生成持仓分析报告（支持多种展示模式）
 
-    def get_comprehensive_level(r):
-        """分层判断综合等级"""
-        signal = r.get("signal", "")
-        rsi = r.get("rsi14", 50)
-        kdj_k = r.get("kdj_k", 50)
-        kdj_d = r.get("kdj_d", 50)
-        macd_hist = r.get("macd_hist", 0)
-        vol_match = r.get("vol_match", False)
-        pos = r.get("price_pos_60d", 50)
+    Args:
+        results: 分析结果列表
+        mode: 报告模式
+            - "compact": 精简模式（默认）
+            - "classic": 经典详表模式
+            - "card": 卡片式布局
+            - "chart": 图表可视化模式
+            - "radar": 多维评分雷达模式
+            - "matrix": 对比矩阵模式
+        output_path: 可选，保存到的文件路径
+    """
+    generators = {
+        "compact": _generate_compact_report,
+        "classic": _generate_classic_report,
+        "card": _generate_card_report,
+        "chart": _generate_chart_report,
+        "radar": _generate_radar_report,
+        "matrix": _generate_matrix_report,
+    }
 
-        # 第一层：知行信号
-        if signal == "STRONG":
-            level = "🟢强势"
-        elif signal == "WATCH":
-            level = "🟡观望"
-        else:
-            level = "🔴危险"
-
-        # 第二层：辅助指标交叉验证
-        indicators = []
-        if rsi < 30:
-            indicators.append("RSI超卖")
-        elif rsi > 70:
-            indicators.append("RSI超买")
-        if kdj_k < 20:
-            indicators.append("KDJ超卖")
-        elif kdj_k > 80:
-            indicators.append("KDJ超买")
-        if macd_hist > 0:
-            indicators.append("MACD多头")
-        else:
-            indicators.append("MACD空头")
-
-        # 第三层：量价位置确认
-        confirm = []
-        if vol_match and r.get("price_change", 0) > 0:
-            confirm.append("量价配合")
-        if pos < 30:
-            confirm.append("低位")
-
-        return level, indicators, confirm
-
-    lines.append("## 1️⃣ 综合建议\n")
-
-    if strong_signals:
-        lines.append("### 🟢 强势\n")
-        for r in strong_signals:
-            close_pct_short = r.get("close_pct_short", 0)
-            deviation_change = r.get("close_deviation_change", 0)
-            line_pos = r.get("line_position", "三线纠缠")
-            deviation_status = "偏离扩大" if deviation_change > 0.2 else ("偏离缩小" if deviation_change < -0.2 else "偏离稳定")
-            if close_pct_short > 2:
-                risk_note = "偏离较大，注意回踩"
-            elif close_pct_short > 0.5:
-                risk_note = "偏离正常，持有"
-            else:
-                risk_note = "贴近短线，关注支撑"
-            desc = f"{line_pos}，收盘偏离短线{close_pct_short:+.2f}%，{deviation_status}，{risk_note}"
-            lines.append(f"- **{r.get('etf_name', '')}**: {desc}")
-        lines.append("")
-
-    if watch_signals:
-        lines.append("### 🟡 观望\n")
-        for r in watch_signals:
-            close_pct_short = r.get("close_pct_short", 0)
-            deviation_change = r.get("close_deviation_change", 0)
-            deviation_status = "偏离扩大" if deviation_change > 0.2 else ("偏离缩小" if deviation_change < -0.2 else "偏离稳定")
-            if abs(close_pct_short) < 1:
-                risk_note = "紧贴短线，回踩不破可加仓，跌破则减仓"
-            else:
-                risk_note = "低于短线，关注回踩压力"
-            desc = f"收盘在白线下方，偏离短线{close_pct_short:+.2f}%，{deviation_status}，{risk_note}"
-            lines.append(f"- **{r.get('etf_name', '')}**: {desc}")
-        lines.append("")
-
-    if oversold:
-        lines.append("### 💡 超跌关注\n")
-        for r in oversold:
-            if r.get("signal") not in ["STRONG", "WATCH"]:
-                short_pct_long = r.get("short_pct_long", 0)
-                rsi = r.get("rsi14", 0)
-                if short_pct_long < -2:
-                    desc = f"RSI={rsi:.0f}超卖，短线偏离长线{short_pct_long:.2f}%，等待止跌信号"
-                else:
-                    desc = f"RSI={rsi:.0f}超卖，{r.get('ma_pattern', '均线纠缠')}，等待企稳"
-                lines.append(f"- **{r.get('etf_name', '')}**: {desc}")
-        lines.append("")
-
-    if danger_signals:
-        lines.append("### 🔴 危险\n")
-        for r in danger_signals:
-            short_pct_long = r.get("short_pct_long", 0)
-            close_pct_long = r.get("close_pct_long", 0)
-            deviation_change = r.get("close_deviation_change", 0)
-            deviation_status = "偏离扩大" if deviation_change > 0.2 else ("偏离缩小" if deviation_change < -0.2 else "偏离稳定")
-            if short_pct_long < -3:
-                risk_note = "偏离较大，等待止跌"
-            elif close_pct_long < -3:
-                risk_note = "远离长线，关注反弹"
-            else:
-                risk_note = "偏弱，关注能否企稳"
-            desc = f"空头排列，短线偏离长线{short_pct_long:+.2f}%，收盘偏离长线{close_pct_long:+.2f}%，{deviation_status}，{risk_note}"
-            lines.append(f"- **{r.get('etf_name', '')}**: {desc}")
-        lines.append("")
-
-    if not strong_signals and not watch_signals and not danger_signals:
-        lines.append("### ⚪ 暂无信号\n")
-        lines.append("- 等待明确趋势信号\n")
-
-    # 概览统计
-    lines.append("### 📈 持仓统计\n")
-    lines.append("| 指标 | 数值 |")
-    lines.append("|:-----|:-----|")
-    lines.append(f"| 持仓数量 | {total} 只 |")
-    lines.append(f"| 平均评分 | {avg_score:.0f}/100 |")
-    lines.append(f"| 🟢 强势 | {len(strong_signals)} 只 |")
-    lines.append(f"| 🟡 观望 | {len(watch_signals)} 只 |")
-    lines.append(f"| 🔴 危险 | {len(danger_signals)} 只 |")
-    lines.append(f"| 💡 超跌 | {len(oversold)} 只 |\n")
-    lines.append("---\n")
-
-    # 1. 持仓明细
-    lines.append("## 2️⃣ 持仓明细\n")
-
-    # 2. 明细
-    lines.append("### 📋 持仓明细\n")
-    lines.append("| ETF | 跟踪指数 | 信号 | 评分 | RSI | 量价 | 位置 | 操作建议 |")
-    lines.append("|:----|:--------|:----:|:----:|:---:|:----:|:----:|:--------:|")
-
-    sorted_results = sorted(results, key=lambda x: x.get("pattern_score", 0), reverse=True)
-    for r in sorted_results:
-        # 信号
-        sig = r.get("signal", "")
-        if sig == "STRONG":
-            sig_icon = "🟢强势"
-        elif sig == "WATCH":
-            sig_icon = "🟡观望"
-        elif sig == "DANGER":
-            sig_icon = "🔴危险"
-        else:
-            sig_icon = "⚪未知"
-
-        # RSI
-        rsi = r.get("rsi14", 50)
-        if rsi < 30:
-            rsi_icon = f"🔴{rsi:.0f}"
-        elif rsi > 70:
-            rsi_icon = f"🟢{rsi:.0f}"
-        else:
-            rsi_icon = f"{rsi:.0f}"
-
-        # 量价
-        vol_match = r.get("vol_match", False)
-        vol_ratio = r.get("vol_ratio", 1)
-        if vol_match:
-            vol_icon = f"✅{vol_ratio:.1f}x"
-        elif vol_ratio > 1.5:
-            vol_icon = f"📈{vol_ratio:.1f}x"
-        elif vol_ratio < 0.7:
-            vol_icon = "📉缩"
-        else:
-            vol_icon = "➡️"
-
-        # 位置
-        pos = r.get("price_pos_60d", 50)
-        if pos < 20:
-            pos_icon = "🔴低位"
-        elif pos < 40:
-            pos_icon = "🟠偏下"
-        elif pos > 80:
-            pos_icon = "🟢高位"
-        elif pos > 60:
-            pos_icon = "🟡偏上"
-        else:
-            pos_icon = "⚪中"
-
-        # 操作建议
-        action = ""
-        if sig == "STRONG":
-            if rsi > 70:
-                action = "持有/减仓"
-            elif rsi < 30:
-                action = "加仓机会"
-            else:
-                action = "持有"
-        elif sig == "WATCH":
-            if rsi < 30:
-                action = "关注"
-            else:
-                action = "观望"
-        else:  # DANGER
-            if rsi < 30:
-                action = "等待"
-            elif pos < 40:
-                action = "关注"
-            else:
-                action = "减仓"
-
-        lines.append(f"| {r.get('etf_name', '')[:8]} | {r.get('index_name', '')[:6]} | {sig_icon} | {r.get('pattern_score', 0):.0f} | {rsi_icon} | {vol_icon} | {pos_icon} | {action} |")
-
-    lines.append("")
-
-    # 2. 详细分析
-    lines.append("---\n")
-    lines.append("## 3️⃣ 详细技术分析\n")
-
-    for i, r in enumerate(sorted_results, 1):
-        lines.append(f"### {i}. {r.get('etf_name', '')}\n")
-        lines.append(f"**跟踪指数**: {r.get('index_name', '')}\n")
-
-        # 知行信号 - 增加偏离比例和趋势描述
-        lines.append("#### 📉 知行信号\n")
-        sig = r.get("signal", "")
-        sig_text = {"STRONG": "🟢强势", "WATCH": "🟡观望", "DANGER": "🔴危险"}.get(sig, "⚪未知")
-        close = r.get("close", 0) or 0
-        short_trend = r.get("zx_short", 0) or 0
-        long_trend = r.get("zx_long", 0) or 0
-        close_pct_short = r.get("close_pct_short", 0)
-        close_pct_long = r.get("close_pct_long", 0)
-        short_pct_long = r.get("short_pct_long", 0)
-        deviation_change = r.get("close_deviation_change", 0)
-
-        lines.append(f"| 知行信号 | {sig_text} |")
-        lines.append(f"| {r.get('line_position', '三线纠缠')} |")
-        lines.append(f"| 收盘偏离短线 | {close_pct_short:+.2f}% | 偏离变化 | {deviation_change:+.2f}% |")
-        lines.append(f"| 收盘偏离长线 | {close_pct_long:+.2f}% | 短线偏离长线 | {short_pct_long:+.2f}% |\n")
-
-        # 趋势描述 - 方案C：复合描述
-        deviation_status = "偏离扩大" if deviation_change > 0.2 else ("偏离缩小" if deviation_change < -0.2 else "偏离稳定")
-        
-        if sig == "STRONG":
-            if close_pct_short > 3:
-                risk_note = "偏离过大，注意回踩风险"
-            elif close_pct_short > 1:
-                risk_note = "偏离正常，持有观察"
-            else:
-                risk_note = "贴近短线，关注是否跌破"
-            trend_desc = f"三线多头排列，收盘偏离短线{close_pct_short:+.2f}%，{deviation_status}，{risk_note}"
-        elif sig == "WATCH":
-            if abs(close_pct_short) < 1:
-                risk_note = "紧贴短线，回踩不破可能形成支撑，跌破则转弱"
-            else:
-                risk_note = "低于短线，关注回踩测试压力"
-            trend_desc = f"白线在长线上方但收盘在短线下方，收盘偏离短线{close_pct_short:+.2f}%，{deviation_status}，{risk_note}"
-        else:
-            if short_pct_long < -3:
-                risk_note = "偏离较大，等待止跌信号"
-            elif close_pct_short < -3:
-                risk_note = "股价远离短线，关注反弹机会"
-            else:
-                risk_note = "偏弱运行，关注是否重新站上"
-            trend_desc = f"三线空头排列，短线偏离长线{short_pct_long:+.2f}%，收盘偏离长线{close_pct_long:+.2f}%，{deviation_status}，{risk_note}"
-        lines.append(f"**趋势判断**: {trend_desc}\n")
-
-        # 均线 - 一句话描述
-        lines.append("#### 📊 均线\n")
-        lines.append(f"**均线系统**: {r.get('ma_pattern', '均线纠缠')}\n")
-
-        # KDJ
-        lines.append("#### 🎯 KDJ\n")
-        k, d, j = r.get("kdj_k", 0), r.get("kdj_d", 0), r.get("kdj_j", 0)
-        if k < 20:
-            status = "🔴超卖"
-        elif k > 80:
-            status = "🟢超买"
-        elif k > d and d > 50:
-            status = "🟡强势"
-        else:
-            status = "⚪中性"
-        lines.append(f"| K | {k:.2f} |")
-        lines.append(f"| D | {d:.2f} |")
-        lines.append(f"| J | {j:.2f} |")
-        lines.append(f"| **判断** | {status} |\n")
-
-        # RSI
-        rsi = r.get("rsi14", 50)
-        if rsi < 30:
-            rsi_status = "🔴严重超卖，可能企稳"
-        elif rsi < 40:
-            rsi_status = "🟠超卖区域"
-        elif rsi < 60:
-            rsi_status = "⚪中性"
-        elif rsi < 70:
-            rsi_status = "🟡偏强"
-        else:
-            rsi_status = "🟢超买，注意风险"
-        lines.append(f"#### 📉 RSI: **{rsi:.2f}** - {rsi_status}\n")
-
-        # MACD
-        lines.append("#### 📉 MACD\n")
-        hist = r.get("macd_hist", 0)
-        macd_status = "🟢红柱" if hist > 0 else "🔴绿柱"
-        lines.append(f"| DIF | {r.get('macd_diff', 0):.6f} |")
-        lines.append(f"| DEA | {r.get('macd_dea', 0):.6f} |")
-        lines.append(f"| 柱 | {hist:.6f} |")
-        lines.append(f"| **状态** | {macd_status} |\n")
-
-        # 异常量能
-        abnormal = r.get("abnormal_signals", [])
-        if abnormal:
-            lines.append("#### ⚠️ 异常量能\n")
-            for sig in abnormal:
-                emoji = "🔴" if sig.get("severity") == "warning" else "🟡"
-                lines.append(f"- {emoji} **{sig.get('type', '')}**: {sig.get('description', '')}")
-            lines.append("")
-
-        lines.append("---\n")
-
-    # 3. 指标说明（放在末尾）
-    lines.append("---\n")
-    lines.append("## 4️⃣ 指标说明\n")
-    lines.append(INDICATOR_GUIDE)
-
-    # 4. 风险提示
-    lines.append("\n## 5️⃣ 风险提示\n")
-    lines.append("1. 本报告仅供参考，不构成投资建议")
-    lines.append("2. 市场有风险，投资需谨慎")
-
-    lines.append("\n---\n")
-    lines.append(f"*报告生成时间: {now}*")
-
-    md = "\n".join(lines)
+    generator = generators.get(mode, _generate_compact_report)
+    md = generator(results)
 
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -744,13 +433,1002 @@ def generate_md_report(results: List[Dict], output_path: str = None) -> str:
     return md
 
 
+def _generate_compact_report(results: List[Dict]) -> str:
+    """精简模式 - 80行版本"""
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
+    total = len(results)
+    avg_score = sum(r.get("pattern_score", 0) for r in results) / total if total else 0
+
+    strong_signals = [r for r in results if r.get("signal") == "STRONG"]
+    watch_signals = [r for r in results if r.get("signal") == "WATCH"]
+    danger_signals = [r for r in results if r.get("signal") == "DANGER"]
+    oversold = [r for r in results if r.get("rsi14", 50) < 35]
+
+    lines = []
+
+    # 标题
+    lines.append("# 📊 持仓ETF分析报告")
+    lines.append(f"*{now}*\n")
+    lines.append("---\n")
+
+    # 持仓概览
+    lines.append("## 📈 持仓概览\n")
+    health_score = avg_score
+    bar_len = 20
+    filled = int(health_score / 100 * bar_len)
+    bar = "█" * filled + "░" * (bar_len - filled)
+    lines.append(f"**健康度**: `{bar}` {health_score:.0f}/100\n")
+
+    lines.append("**信号分布**:\n")
+    for sig_name, sig_list, emoji in [
+        ("强势", strong_signals, "🟢"),
+        ("观望", watch_signals, "🟡"),
+        ("危险", danger_signals, "🔴"),
+    ]:
+        count = len(sig_list)
+        pct = count / total * 100 if total > 0 else 0
+        bar = "▓" * int(pct / 5) + "░" * (20 - int(pct / 5))
+        lines.append(f"{emoji} {sig_name}: `{bar}` {count}只 ({pct:.0f}%)")
+
+    lines.append("")
+    lines.append("| 🟢强势 | 🟡观望 | 🔴危险 | 💡超跌 |")
+    lines.append("|:-----:|:-----:|:-----:|:-----:|")
+    lines.append(f"| {len(strong_signals)} | {len(watch_signals)} | {len(danger_signals)} | {len(oversold)} |\n")
+
+    # 持仓明细
+    lines.append("---\n")
+    lines.append("## 📋 持仓明细\n")
+    lines.append("| ETF | 跟踪指数 | 信号 | 评分 | RSI | 量价 | 位置 | 操作 |")
+    lines.append("|:----|:--------|:----:|:----:|:---:|:----:|:----:|:----:|")
+
+    sorted_results = sorted(results, key=lambda x: x.get("pattern_score", 0), reverse=True)
+    for r in sorted_results:
+        sig = r.get("signal", "")
+        sig_emoji = {"STRONG": "🟢", "WATCH": "🟡", "DANGER": "🔴"}.get(sig, "⚪")
+        rsi = r.get("rsi14", 50)
+        rsi_emoji = "🔴" if rsi < 30 else ("🟢" if rsi > 70 else "")
+        vol_ratio = r.get("vol_ratio", 1)
+        vol_emoji = "↑" if vol_ratio > 1.2 else ("↓" if vol_ratio < 0.8 else "→")
+        pos = r.get("price_pos_60d", 50)
+        pos_emoji = "低" if pos < 30 else ("高" if pos > 70 else "中")
+        action = _get_action_short(r)
+        action_emoji = "➕" if "加仓" in action else ("➖" if "减仓" in action else ("⏸" if "等待" in action else "👀"))
+        lines.append(f"| {r.get('etf_name', '')[:8]} | {r.get('index_name', '')[:6]} | {sig_emoji} | {r.get('pattern_score', 0):.0f} | {rsi_emoji}{rsi:.0f} | {vol_emoji} | {pos_emoji} | {action_emoji}{action} |")
+
+    lines.append("")
+
+    # 重点关注
+    if strong_signals or danger_signals:
+        lines.append("---\n")
+        lines.append("## 🎯 重点关注\n")
+        if strong_signals:
+            lines.append("### 🟢 强势标的\n")
+            for r in strong_signals:
+                action = _get_action_short(r)
+                rsi = r.get("rsi14", 0)
+                lines.append(f"- **{r.get('etf_name', '')}**: {action}（RSI={rsi:.0f}）")
+        if danger_signals:
+            lines.append("\n### 🔴 危险标的\n")
+            for r in danger_signals:
+                action = _get_action_short(r)
+                pos = r.get("price_pos_60d", 0)
+                pos_desc = "低位" if pos < 30 else ("高位" if pos > 70 else "中性")
+                lines.append(f"- **{r.get('etf_name', '')}**: {action}（{pos_desc}）")
+        lines.append("")
+
+    # 指标速查
+    lines.append("---\n")
+    lines.append("## 📖 指标速查\n")
+    lines.append("| 指标 | 区间 | 含义 |")
+    lines.append("|:----:|:----:|:----|")
+    lines.append("| RSI | <30 / >70 | 🔴超卖 / 🟢超买 |")
+    lines.append("| KDJ | <20 / >80 | 🔴超卖 / 🟢超买 |")
+    lines.append("| MACD | 红柱/绿柱 | 🟢多头/🔴空头 |")
+    lines.append("| 位置 | <20%/>80% | 🔴低位/🟢高位 |")
+    lines.append("| 量价 | ↑放量/↓缩量 | 动能足/动能弱 |\n")
+
+    # 风险提示
+    lines.append("---\n")
+    lines.append("**⚠️ 风险提示**: 本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。\n")
+    lines.append(f"\n*报告生成时间: {now}*")
+
+    return "\n".join(lines)
+
+
+def _generate_classic_report(results: List[Dict]) -> str:
+    """
+    方案一：经典详表模式
+    - 保留所有技术指标表格
+    - 每只ETF完整展示知行信号、均线、KDJ、RSI、MACD、成交量
+    - 数据最全面，适合深度分析
+    """
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
+    total = len(results)
+    avg_score = sum(r.get("pattern_score", 0) for r in results) / total if total else 0
+
+    strong_signals = [r for r in results if r.get("signal") == "STRONG"]
+    watch_signals = [r for r in results if r.get("signal") == "WATCH"]
+    danger_signals = [r for r in results if r.get("signal") == "DANGER"]
+
+    lines = []
+
+    # 标题
+    lines.append("# 📊 持仓ETF详细分析报告（经典详表版）")
+    lines.append(f"*{now}*\n")
+    lines.append("---\n")
+
+    # 一、持仓概览
+    lines.append("## 一、持仓概览\n")
+    lines.append(f"**持仓数量**: {total} 只ETF")
+    lines.append(f"**平均评分**: {avg_score:.1f}/100\n")
+
+    lines.append("| 指标 | 强势 | 观望 | 危险 |")
+    lines.append("|:----:|:----:|:----:|:----:|")
+    lines.append(f"| 数量 | 🟢{len(strong_signals)} | 🟡{len(watch_signals)} | 🔴{len(danger_signals)} |\n")
+
+    # 二、知行信号汇总表
+    lines.append("---\n")
+    lines.append("## 二、知行信号汇总\n")
+    lines.append("| ETF名称 | 跟踪指数 | 信号 | 排列状态 | 评分 | 操作建议 |")
+    lines.append("|:--------|:--------|:-----|:---------|:----:|:--------:|\n")
+
+    sorted_results = sorted(results, key=lambda x: x.get("pattern_score", 0), reverse=True)
+    for r in sorted_results:
+        sig = r.get("signal", "")
+        sig_map = {"STRONG": "🟢强势", "WATCH": "🟡观望", "DANGER": "🔴危险"}
+        sig_text = sig_map.get(sig, "⚪未知")
+        position = r.get("position", "纠缠")
+        score = r.get("pattern_score", 0)
+        action = _get_action_short(r)
+        lines.append(f"| {r.get('etf_name', '')} | {r.get('index_name', '')[:10]} | {sig_text} | {position} | {score:.0f} | {action} |")
+
+    lines.append("")
+
+    # 三、详细技术分析
+    lines.append("---\n")
+    lines.append("## 三、详细技术分析\n")
+
+    for i, r in enumerate(sorted_results, 1):
+        lines.append(f"### {i}. {r.get('etf_name', '')} ({r.get('index_code', '')})\n")
+        lines.append(f"**跟踪指数**: {r.get('index_name', '')}\n")
+
+        # 知行趋势线
+        lines.append("#### 📉 知行趋势线信号\n")
+        zx_short = r.get("zx_short", 0)
+        zx_long = r.get("zx_long", 0)
+        close = r.get("close", 0)
+        sig = r.get("signal", "")
+        sig_map = {"STRONG": "🟢强势信号", "WATCH": "🟡观望信号", "DANGER": "🔴危险信号"}
+
+        lines.append("| 指标 | 数值 | 解读 |")
+        lines.append("|:----:|:----:|:----|")
+        lines.append(f"| 知行信号 | {sig_map.get(sig, '⚪未知')} | - |")
+        lines.append(f"| 白线(EMA) | {zx_short:.4f} | {'▲' if close > zx_short else '▼'} {abs((close/zx_short-1)*100):.2f}% |")
+        lines.append(f"| 黄线(均线组) | {zx_long:.4f} | {'▲' if close > zx_long else '▼'} {abs((close/zx_long-1)*100):.2f}% |")
+        lines.append(f"| 三线位置 | {r.get('line_position', '纠缠')} | - |")
+        lines.append(f"| 均线排列 | {r.get('ma_pattern', '纠缠')} | - |\n")
+
+        # 均线分析
+        lines.append("#### 📊 均线分析\n")
+        lines.append("| 均线 | 数值 | 价格对比 |")
+        lines.append("|:----:|:----:|:--------:|\n")
+
+        ma5 = r.get("ma5", 0)
+        ma10 = r.get("ma10", 0)
+        ma20 = r.get("ma20", 0)
+        ma60 = r.get("ma60", 0)
+
+        for ma_name, ma_val in [("MA5", ma5), ("MA10", ma10), ("MA20", ma20), ("MA60", ma60)]:
+            if ma_val and ma_val != 0:
+                diff = "▲" if close > ma_val else "▼"
+                pct = f"{abs((close/ma_val-1)*100):.2f}%"
+                lines.append(f"| {ma_name} | {ma_val:.4f} | {diff} {pct} |")
+
+        lines.append("")
+
+        # KDJ
+        lines.append("#### 🎯 KDJ 指标\n")
+        kdj_k = r.get("kdj_k", 0)
+        kdj_d = r.get("kdj_d", 0)
+        kdj_j = r.get("kdj_j", 0)
+
+        if kdj_k < 20:
+            kdj_status = "🔴 超卖区域"
+        elif kdj_k > 80:
+            kdj_status = "🟢 超买区域"
+        elif kdj_k > kdj_d and kdj_d > 50:
+            kdj_status = "🟡 强势区域"
+        else:
+            kdj_status = "⚪ 中性区域"
+
+        lines.append("| 指标 | 数值 | 状态 |")
+        lines.append("|:----:|:----:|:----|")
+        lines.append(f"| K | {kdj_k:.2f} | {'偏高' if kdj_k > 70 else '偏低' if kdj_k < 30 else '正常'} |")
+        lines.append(f"| D | {kdj_d:.2f} | - |")
+        lines.append(f"| J | {kdj_j:.2f} | - |")
+        lines.append(f"| **判断** | - | {kdj_status} |\n")
+
+        # RSI
+        lines.append("#### 📉 RSI 指标\n")
+        rsi = r.get("rsi14", 50)
+        if rsi < 30:
+            rsi_status = "🔴 严重超卖"
+        elif rsi < 40:
+            rsi_status = "🟠 超卖区域"
+        elif rsi < 60:
+            rsi_status = "⚪ 中性区域"
+        elif rsi < 70:
+            rsi_status = "🟡 偏强区域"
+        else:
+            rsi_status = "🟢 超买区域"
+
+        lines.append("| RSI(14) | 状态 |")
+        lines.append("|:-------:|:----|")
+        lines.append(f"| **{rsi:.2f}** | {rsi_status} |\n")
+
+        # MACD
+        lines.append("#### 📉 MACD 指标\n")
+        macd_diff = r.get("macd_diff", 0)
+        macd_dea = r.get("macd_dea", 0)
+        macd_hist = r.get("macd_hist", 0)
+
+        macd_status = "🟢 红柱（多方主导）" if macd_hist > 0 else "🔴 绿柱（空方主导）"
+
+        lines.append("| 指标 | 数值 |")
+        lines.append("|:----:|:----:|")
+        lines.append(f"| DIF | {macd_diff:.6f} |")
+        lines.append(f"| DEA | {macd_dea:.6f} |")
+        lines.append(f"| MACD柱 | {macd_hist:.6f} |")
+        lines.append(f"| **状态** | {macd_status} |\n")
+
+        # 成交量
+        lines.append("#### 📊 成交量分析\n")
+        vol_ratio = r.get("vol_ratio", 1)
+        vol_match = r.get("vol_match", False)
+        price_pos = r.get("price_pos_60d", 50)
+
+        if vol_ratio > 2:
+            vol_status = "🔴 巨量放大"
+        elif vol_ratio > 1.5:
+            vol_status = "🟡 明显放量"
+        elif vol_ratio < 0.5:
+            vol_status = "🟢 地量萎缩"
+        else:
+            vol_status = "⚪ 量能正常"
+
+        lines.append("| 指标 | 数值 | 解读 |")
+        lines.append("|:----:|:----:|:----|")
+        lines.append(f"| 放量倍数 | {vol_ratio:.2f}x | {vol_status} |")
+        lines.append(f"| 量价配合 | {'是' if vol_match else '否'} | {'✅健康' if vol_match else '⚠️背离'} |")
+        lines.append(f"| 60日价格位置 | {price_pos:.1f}% | {'低位' if price_pos < 30 else '高位' if price_pos > 70 else '中性'} |\n")
+
+        # 异常信号
+        abnormal = r.get("abnormal_signals", [])
+        if abnormal:
+            lines.append("#### ⚠️ 异常信号\n")
+            for sig in abnormal:
+                sig_type = sig.get("type", "")
+                desc = sig.get("description", "")
+                severity = sig.get("severity", "")
+                emoji = "🔴" if severity == "warning" else "🟡" if severity == "positive" else "🟢"
+                lines.append(f"- {emoji} **{sig_type}**: {desc}")
+            lines.append("")
+
+        lines.append("---\n")
+
+    # 四、综合建议
+    lines.append("## 四、综合操作建议\n")
+    if strong_signals:
+        lines.append("### 🟢 重点关注（强势信号）\n")
+        for r in strong_signals:
+            lines.append(f"- **{r.get('etf_name', '')}**: 出现强势信号，可适当关注")
+        lines.append("")
+    if watch_signals:
+        lines.append("### 🟡 观望标的\n")
+        for r in watch_signals:
+            lines.append(f"- **{r.get('etf_name', '')}**: 趋势未明，等待方向确认")
+        lines.append("")
+    if danger_signals:
+        lines.append("### 🔴 谨慎对待（危险信号）\n")
+        for r in danger_signals:
+            action = _get_action_short(r)
+            lines.append(f"- **{r.get('etf_name', '')}**: {action}")
+        lines.append("")
+
+    # 五、风险提示
+    lines.append("---\n")
+    lines.append("## 五、风险提示\n")
+    lines.append("1. 📊 本报告仅供参考，不构成投资建议")
+    lines.append("2. ⚠️ 市场有风险，投资需谨慎")
+    lines.append("3. 📈 过往业绩不代表未来表现")
+    lines.append("4. 🔄 建议定期复盘，动态调整持仓\n")
+    lines.append(f"\n*报告生成时间: {now}*")
+
+    return "\n".join(lines)
+
+
+def _generate_card_report(results: List[Dict]) -> str:
+    """
+    方案二：卡片式布局
+    - 每只ETF用卡片形式展示
+    - 左上：信号评分 | 右上：操作建议
+    - 下方：关键指标一览
+    - 视觉清晰，便于快速浏览
+    """
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
+    total = len(results)
+    avg_score = sum(r.get("pattern_score", 0) for r in results) / total if total else 0
+
+    lines = []
+
+    # 标题
+    lines.append("# 📊 持仓ETF分析报告（卡片版）")
+    lines.append(f"*{now}*\n")
+    lines.append("---\n")
+
+    # 概览统计
+    lines.append("## 📈 持仓概览\n")
+
+    strong = len([r for r in results if r.get("signal") == "STRONG"])
+    watch = len([r for r in results if r.get("signal") == "WATCH"])
+    danger = len([r for r in results if r.get("signal") == "DANGER"])
+
+    bar_len = 20
+    filled = int(avg_score / 100 * bar_len)
+    bar = "█" * filled + "░" * (bar_len - filled)
+
+    lines.append(f"**整体健康度**: `{bar}` {avg_score:.0f}/100\n")
+    lines.append(f"| 🟢强势: {strong} | 🟡观望: {watch} | 🔴危险: {danger} |\n")
+
+    # ETF卡片
+    lines.append("---\n")
+    lines.append("## 📋 持仓卡片\n")
+
+    sorted_results = sorted(results, key=lambda x: x.get("pattern_score", 0), reverse=True)
+
+    for r in sorted_results:
+        sig = r.get("signal", "")
+        score = r.get("pattern_score", 0)
+        action = _get_action_short(r)
+
+        # 卡片边框颜色
+        border_color = {"STRONG": "🟢", "WATCH": "🟡", "DANGER": "🔴"}.get(sig, "⚪")
+
+        lines.append(f"### {border_color} {r.get('etf_name', '')}\n")
+        lines.append(f"| **跟踪指数** | {r.get('index_name', '')} |")
+        lines.append(f"| **知行信号** | {sig} |")
+        lines.append(f"| **综合评分** | {score:.0f}/100 |")
+        lines.append(f"| **操作建议** | {action} |\n")
+
+        # 关键指标网格
+        lines.append("| 指标 | 数值 | 状态 |")
+        lines.append("|:----:|:----:|:----|")
+
+        rsi = r.get("rsi14", 50)
+        rsi_emoji = "🔴" if rsi < 30 else ("🟢" if rsi > 70 else "⚪")
+        rsi_status = "超卖" if rsi < 30 else "超买" if rsi > 70 else "正常"
+        lines.append(f"| RSI(14) | {rsi:.1f} | {rsi_emoji} {rsi_status} |")
+
+        kdj_k = r.get("kdj_k", 0)
+        kdj_emoji = "🔴" if kdj_k < 20 else ("🟢" if kdj_k > 80 else "⚪")
+        lines.append(f"| KDJ(K) | {kdj_k:.1f} | {kdj_emoji} |")
+
+        macd_hist = r.get("macd_hist", 0)
+        macd_emoji = "🟢" if macd_hist > 0 else "🔴"
+        lines.append(f"| MACD柱 | {macd_hist:.4f} | {macd_emoji} |")
+
+        vol_ratio = r.get("vol_ratio", 1)
+        vol_emoji = "📈" if vol_ratio > 1.2 else ("📉" if vol_ratio < 0.8 else "➡️")
+        lines.append(f"| 量能 | {vol_ratio:.2f}x | {vol_emoji} |")
+
+        price_pos = r.get("price_pos_60d", 50)
+        pos_emoji = "🔴" if price_pos < 30 else ("🟢" if price_pos > 70 else "⚪")
+        pos_desc = "低位" if price_pos < 30 else "高位" if price_pos > 70 else "中性"
+        lines.append(f"| 60日位置 | {price_pos:.0f}% | {pos_emoji} {pos_desc} |\n")
+
+        # 均线状态
+        lines.append("**均线状态**: " + r.get('ma_pattern', '纠缠') + "\n")
+        lines.append("**三线位置**: " + r.get('line_position', '纠缠') + "\n")
+
+        # 异常信号
+        abnormal = r.get("abnormal_signals", [])
+        if abnormal:
+            lines.append("**⚠️ 异常**: " + " | ".join([f"{s.get('type', '')}" for s in abnormal]) + "\n")
+
+        lines.append("---\n")
+
+    # 风险提示
+    lines.append("**⚠️ 风险提示**: 本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。\n")
+    lines.append(f"\n*报告生成时间: {now}*")
+
+    return "\n".join(lines)
+
+
+def _generate_chart_report(results: List[Dict]) -> str:
+    """
+    方案三：图表可视化模式
+    - ASCII条形图展示评分
+    - 指标仪表盘
+    - 趋势箭头可视化
+    - 视觉效果突出，便于快速对比
+    """
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
+    total = len(results)
+    avg_score = sum(r.get("pattern_score", 0) for r in results) / total if total else 0
+
+    lines = []
+
+    # 标题
+    lines.append("# 📊 持仓ETF分析报告（图表示例版）")
+    lines.append(f"*{now}*\n")
+    lines.append("---\n")
+
+    # 整体健康度仪表盘
+    lines.append("## 📈 整体健康度仪表盘\n")
+    lines.append("```\n")
+
+    score = avg_score
+    filled = int(score / 5)  # 20格，每格5分
+    bar = "█" * filled + "░" * (20 - filled)
+
+    if score >= 60:
+        gauge = "🟢"
+    elif score >= 40:
+        gauge = "🟡"
+    else:
+        gauge = "🔴"
+
+    lines.append(f"  0%  10%  20%  30%  40%  50%  60%  70%  80%  90% 100%")
+    lines.append(f"  │   │   │   │   │   │   │   │   │   │   │")
+    lines.append(f"  └────────────────────────────────────────┘")
+    lines.append(f"  {bar}")
+    lines.append(f"  │{' '*filled}{gauge}{' '*max(0, 19-filled)}│")
+    lines.append(f"  └────────────────────────────────────────┘")
+    lines.append(f"                            {score:.0f}/100")
+    lines.append("```\n")
+
+    # 信号分布饼图（ASCII版）
+    lines.append("## 📊 信号分布\n")
+    strong = len([r for r in results if r.get("signal") == "STRONG"])
+    watch = len([r for r in results if r.get("signal") == "WATCH"])
+    danger = len([r for r in results if r.get("signal") == "DANGER"])
+
+    lines.append("```")
+    lines.append(f"         持仓信号分布")
+    lines.append(f"        ┌─────────────┐")
+    lines.append(f"       ╱               ╲")
+    lines.append(f"      │    🟢 {strong} 只    │")
+    lines.append(f"      │   ╱       ╲     │")
+    lines.append(f"      │ 🟡{watch}      🔴{danger}│")
+    lines.append(f"       ╲               ╱")
+    lines.append(f"        └─────────────┘")
+    lines.append("```\n")
+
+    # 各ETF评分条形图
+    lines.append("---\n")
+    lines.append("## 📉 各ETF评分对比\n")
+
+    sorted_results = sorted(results, key=lambda x: x.get("pattern_score", 0), reverse=True)
+
+    for r in sorted_results:
+        name = r.get('etf_name', '')[:8]
+        score = r.get("pattern_score", 0)
+        sig = r.get("signal", "")
+
+        filled = int(score / 5)  # 20格
+        color = "🟢" if sig == "STRONG" else ("🟡" if sig == "WATCH" else "🔴")
+
+        bar = "█" * filled + "░" * (20 - filled)
+        lines.append(f"{color} {name:<8} │{bar}│ {score:.0f}")
+
+    lines.append("")
+
+    # 指标仪表盘
+    lines.append("---\n")
+    lines.append("## 🎯 关键指标仪表盘\n")
+
+    lines.append("```")
+    lines.append("┌─────────────────────────────────────────────────────────┐")
+    lines.append("│                    RSI 相对强弱指标                      │")
+    lines.append("├─────────────────────────────────────────────────────────┤")
+
+    for r in sorted_results:
+        name = r.get('etf_name', '')[:6]
+        rsi = r.get("rsi14", 50)
+
+        # RSI条形
+        rsi_bar_len = 30
+        rsi_pos = int(rsi / 100 * rsi_bar_len)
+        rsi_bar = "█" * rsi_pos + "░" * (rsi_bar_len - rsi_pos)
+
+        rsi_color = "🔴" if rsi < 30 else ("🟢" if rsi > 70 else "⚪")
+        lines.append(f"│ {name:<6} │{rsi_bar}│ {rsi:>5.1f} {rsi_color} │")
+
+    lines.append("│          └──0──────30──────50──────70──────100──→      │")
+    lines.append("└─────────────────────────────────────────────────────────┘")
+    lines.append("```\n")
+
+    # KDJ 状态矩阵
+    lines.append("```")
+    lines.append("┌─────────────────────────────────────────────────────────┐")
+    lines.append("│                    KDJ 随机指标                          │")
+    lines.append("├─────────────────────────────────────────────────────────┤")
+    lines.append("│ ETF      │ K值      │ D值      │ 状态                    │")
+    lines.append("├──────────┼──────────┼──────────┼─────────────────────────┤")
+
+    for r in sorted_results:
+        name = r.get('etf_name', '')[:6]
+        k = r.get("kdj_k", 0)
+        d = r.get("kdj_d", 0)
+
+        if k < 20:
+            status = "🔴超卖"
+        elif k > 80:
+            status = "🟢超买"
+        elif k > d and d > 50:
+            status = "🟡强势"
+        else:
+            status = "⚪中性"
+
+        lines.append(f"│ {name:<8} │ {k:>6.1f}   │ {d:>6.1f}   │ {status:<20} │")
+
+    lines.append("└─────────────────────────────────────────────────────────┘")
+    lines.append("```\n")
+
+    # MACD 红绿柱
+    lines.append("```")
+    lines.append("┌─────────────────────────────────────────────────────────┐")
+    lines.append("│                    MACD 指标                            │")
+    lines.append("├─────────────────────────────────────────────────────────┤")
+
+    for r in sorted_results:
+        name = r.get('etf_name', '')[:6]
+        hist = r.get("macd_hist", 0)
+
+        bar_len = 20
+        if hist > 0:
+            filled = min(int(abs(hist) * 1000), bar_len)
+            bar = " " * (bar_len - filled) + "█" * filled
+            status = f"🟢 {bar} +{hist:.4f}"
+        else:
+            filled = min(int(abs(hist) * 1000), bar_len)
+            bar = "░" * filled + " " * (bar_len - filled)
+            status = f"🔴 {bar} {hist:.4f}"
+
+        lines.append(f"│ {name:<6} │ {status} │")
+
+    lines.append("│          └──红柱(多方)        绿柱(空方)──→              │")
+    lines.append("└─────────────────────────────────────────────────────────┘")
+    lines.append("```\n")
+
+    # 操作建议矩阵
+    lines.append("---\n")
+    lines.append("## 📋 操作建议矩阵\n")
+
+    lines.append("| ETF | 信号 | 评分 | RSI | MACD | 量能 | 操作 |")
+    lines.append("|:----|:----:|:----:|:---:|:----:|:----:|:----:|")
+
+    for r in sorted_results:
+        name = r.get('etf_name', '')[:8]
+        sig = r.get("signal", "")
+        score = r.get("pattern_score", 0)
+        rsi = r.get("rsi14", 50)
+        rsi_emoji = "🔴" if rsi < 30 else ("🟢" if rsi > 70 else "⚪")
+        macd_hist = r.get("macd_hist", 0)
+        macd_emoji = "🟢" if macd_hist > 0 else "🔴"
+        vol_ratio = r.get("vol_ratio", 1)
+        vol_emoji = "📈" if vol_ratio > 1.2 else ("📉" if vol_ratio < 0.8 else "➡️")
+        action = _get_action_short(r)
+        sig_emoji = {"STRONG": "🟢", "WATCH": "🟡", "DANGER": "🔴"}.get(sig, "⚪")
+
+        lines.append(f"| {name} | {sig_emoji} | {score:.0f} | {rsi_emoji}{rsi:.0f} | {macd_emoji} | {vol_emoji} | {action} |")
+
+    lines.append("")
+
+    # 风险提示
+    lines.append("---\n")
+    lines.append("**⚠️ 风险提示**: 本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。\n")
+    lines.append(f"\n*报告生成时间: {now}*")
+
+    return "\n".join(lines)
+
+
+def _generate_radar_report(results: List[Dict]) -> str:
+    """
+    方案四：多维评分雷达模式
+    - 趋势、动量、量能、位置四维度评分
+    - 雷达图（文本版）
+    - 便于快速识别各ETF的优劣势
+    """
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
+    total = len(results)
+
+    def calc_dimensions(r: dict) -> dict:
+        """计算四个维度的评分"""
+        # 趋势维度（基于知行信号）
+        sig = r.get("signal", "")
+        trend_score = 100 if sig == "STRONG" else (50 if sig == "WATCH" else 0)
+
+        # 动量维度（RSI）
+        rsi = r.get("rsi14", 50)
+        if 40 <= rsi <= 60:
+            momentum_score = 50
+        elif rsi < 40:
+            momentum_score = 30 + (40 - rsi)  # 超卖加分
+        else:
+            momentum_score = 50 - (rsi - 60)  # 超买减分
+        momentum_score = max(0, min(100, momentum_score))
+
+        # 量能维度
+        vol_ratio = r.get("vol_ratio", 1)
+        vol_match = r.get("vol_match", False)
+        if vol_match:
+            volume_score = 80
+        elif vol_ratio > 1.5:
+            volume_score = 70
+        elif vol_ratio < 0.5:
+            volume_score = 40
+        else:
+            volume_score = 60
+
+        # 位置维度（60日位置）
+        pos = r.get("price_pos_60d", 50)
+        if 30 <= pos <= 70:
+            position_score = 60
+        elif pos < 30:
+            position_score = 80  # 低位加分
+        else:
+            position_score = max(20, 80 - (pos - 70) * 2)
+
+        return {
+            "trend": trend_score,
+            "momentum": momentum_score,
+            "volume": volume_score,
+            "position": position_score,
+        }
+
+    lines = []
+
+    # 标题
+    lines.append("# 📊 持仓ETF分析报告（多维雷达版）")
+    lines.append(f"*{now}*\n")
+    lines.append("---\n")
+
+    # 概览
+    lines.append("## 📈 持仓概览\n")
+    lines.append("| ETF | 🧭趋势 | ⚡动量 | 📊量能 | 📍位置 | ⭐综合 |")
+    lines.append("|:----|:-----:|:------:|:------:|:------:|:-----:|")
+
+    sorted_results = sorted(results, key=lambda x: x.get("pattern_score", 0), reverse=True)
+
+    for r in sorted_results:
+        dims = calc_dimensions(r)
+        name = r.get('etf_name', '')[:8]
+        overall = (dims["trend"] + dims["momentum"] + dims["volume"] + dims["position"]) / 4
+
+        trend_bar = "█" * int(dims["trend"] / 10) + "░" * (10 - int(dims["trend"] / 10))
+        mom_bar = "█" * int(dims["momentum"] / 10) + "░" * (10 - int(dims["momentum"] / 10))
+        vol_bar = "█" * int(dims["volume"] / 10) + "░" * (10 - int(dims["volume"] / 10))
+        pos_bar = "█" * int(dims["position"] / 10) + "░" * (10 - int(dims["position"] / 10))
+
+        lines.append(f"| **{name}** | {trend_bar} {dims['trend']:.0f} | {mom_bar} {dims['momentum']:.0f} | {vol_bar} {dims['volume']:.0f} | {pos_bar} {dims['position']:.0f} | **{overall:.0f}** |")
+
+    lines.append("")
+
+    # 雷达图（文本版）
+    lines.append("---\n")
+    lines.append("## 🎯 多维雷达图\n")
+    lines.append("```")
+    lines.append("                    🧭趋势")
+    lines.append("                      ▲")
+    lines.append("                     ╱ ╲")
+    lines.append("                    ╱   ╲")
+
+    # 绘制10个同心菱形
+    for level in range(10, 0, -1):
+        level_score = level * 10
+        chars = []
+        for r in sorted_results[:5]:  # 最多5个ETF
+            dims = calc_dimensions(r)
+            # 找到这个ETF在该维度的点
+            if dims["trend"] >= level_score:
+                chars.append("●")
+            else:
+                chars.append("○")
+
+        indent = " " * (20 - len(chars) - level)
+        lines.append(f"{indent}{'  '.join(chars)}")
+
+    lines.append("                   ╱ ⚡动量  📊量能 ╲")
+    lines.append("                  ╱─────────────────╲")
+    lines.append("                 ◄─────────📍位置──────►")
+    lines.append("```\n")
+
+    lines.append("**图例**: ● = 该维度得分 │ ○ = 该维度未达此分数\n")
+
+    # 综合评分排名
+    lines.append("---\n")
+    lines.append("## 🏆 综合评分排名\n")
+
+    scored_results = []
+    for r in sorted_results:
+        dims = calc_dimensions(r)
+        overall = (dims["trend"] + dims["momentum"] + dims["volume"] + dims["position"]) / 4
+        scored_results.append((r, dims, overall))
+
+    scored_results.sort(key=lambda x: x[2], reverse=True)
+
+    for i, (r, dims, overall) in enumerate(scored_results, 1):
+        name = r.get('etf_name', '')
+        sig = r.get("signal", "")
+        sig_emoji = {"STRONG": "🟢", "WATCH": "🟡", "DANGER": "🔴"}.get(sig, "⚪")
+
+        medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"#{i}"))
+        bar_len = int(overall / 5)
+        bar = "█" * bar_len + "░" * (20 - bar_len)
+
+        lines.append(f"{medal} **{name}** {sig_emoji}\n")
+        lines.append(f"   综合: `{bar}` {overall:.0f}/100")
+        lines.append(f"   趋势:{dims['trend']:.0f} 动量:{dims['momentum']:.0f} 量能:{dims['volume']:.0f} 位置:{dims['position']:.0f}\n")
+
+    # 详细分析
+    lines.append("---\n")
+    lines.append("## 📖 维度分析说明\n")
+
+    lines.append("| 维度 | 计算方式 | 评分说明 |")
+    lines.append("|:----:|:--------|:--------|")
+    lines.append("| 🧭趋势 | 知行信号 | 🟢强势=100 🟡观望=50 🔴危险=0 |")
+    lines.append("| ⚡动量 | RSI指标 | 40-60=50基准，超卖加分超买减分 |")
+    lines.append("| 📊量能 | 量价配合 | 配合=80,放量=70,正常=60,缩量=40 |")
+    lines.append("| 📍位置 | 60日位置 | 低位30以下=80,中性=60,高位减分 |")
+
+    lines.append("")
+
+    # 风险提示
+    lines.append("---\n")
+    lines.append("**⚠️ 风险提示**: 本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。\n")
+    lines.append(f"\n*报告生成时间: {now}*")
+
+    return "\n".join(lines)
+
+
+def _generate_matrix_report(results: List[Dict]) -> str:
+    """
+    方案五：对比矩阵模式
+    - 多维度横向对比表格
+    - 按信号分类分组
+    - 便于快速对比同类ETF
+    """
+    beijing_tz = timezone(timedelta(hours=8))
+    now = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M")
+
+    lines = []
+
+    # 标题
+    lines.append("# 📊 持仓ETF分析报告（对比矩阵版）")
+    lines.append(f"*{now}*\n")
+    lines.append("---\n")
+
+    sorted_results = sorted(results, key=lambda x: x.get("pattern_score", 0), reverse=True)
+
+    # 按信号分组
+    strong_signals = [r for r in sorted_results if r.get("signal") == "STRONG"]
+    watch_signals = [r for r in sorted_results if r.get("signal") == "WATCH"]
+    danger_signals = [r for r in sorted_results if r.get("signal") == "DANGER"]
+
+    # 强势标的矩阵
+    if strong_signals:
+        lines.append("## 🟢 强势标的矩阵\n")
+        lines.append("| ETF | 评分 | RSI | KDJ | MACD | 量能 | 位置 | 偏离度 | 操作 |")
+        lines.append("|:----|:----:|:---:|:---:|:----:|:----:|:----:|:------:|:----:|")
+
+        for r in strong_signals:
+            name = r.get('etf_name', '')[:8]
+            score = r.get("pattern_score", 0)
+            rsi = r.get("rsi14", 50)
+            rsi_emoji = "🔴" if rsi < 30 else ("🟢" if rsi > 70 else "🟡")
+            kdj_k = r.get("kdj_k", 0)
+            kdj_emoji = "🔴" if kdj_k < 20 else ("🟢" if kdj_k > 80 else "🟡")
+            macd_hist = r.get("macd_hist", 0)
+            macd_emoji = "🟢" if macd_hist > 0 else "🔴"
+            vol_ratio = r.get("vol_ratio", 1)
+            vol_emoji = "📈" if vol_ratio > 1.2 else ("📉" if vol_ratio < 0.8 else "➡️")
+            pos = r.get("price_pos_60d", 50)
+            pos_desc = "🔴低" if pos < 30 else ("🟢高" if pos > 70 else "🟡中")
+            close_pct = r.get("close_pct_short", 0)
+            pct_desc = f"{'▲' if close_pct > 0 else '▼'}{abs(close_pct):.1f}%"
+            action = _get_action_short(r)
+
+            lines.append(f"| {name} | {score:.0f} | {rsi_emoji}{rsi:.0f} | {kdj_emoji}{kdj_k:.0f} | {macd_emoji} | {vol_emoji}{vol_ratio:.1f}x | {pos_desc}{pos:.0f}% | {pct_desc} | {action} |")
+
+        lines.append("")
+
+    # 观望标的矩阵
+    if watch_signals:
+        lines.append("---\n")
+        lines.append("## 🟡 观望标的矩阵\n")
+        lines.append("| ETF | 评分 | RSI | KDJ | MACD | 量能 | 位置 | 偏离度 | 操作 |")
+        lines.append("|:----|:----:|:---:|:---:|:----:|:----:|:----:|:------:|:----:|")
+
+        for r in watch_signals:
+            name = r.get('etf_name', '')[:8]
+            score = r.get("pattern_score", 0)
+            rsi = r.get("rsi14", 50)
+            rsi_emoji = "🔴" if rsi < 30 else ("🟢" if rsi > 70 else "🟡")
+            kdj_k = r.get("kdj_k", 0)
+            kdj_emoji = "🔴" if kdj_k < 20 else ("🟢" if kdj_k > 80 else "🟡")
+            macd_hist = r.get("macd_hist", 0)
+            macd_emoji = "🟢" if macd_hist > 0 else "🔴"
+            vol_ratio = r.get("vol_ratio", 1)
+            vol_emoji = "📈" if vol_ratio > 1.2 else ("📉" if vol_ratio < 0.8 else "➡️")
+            pos = r.get("price_pos_60d", 50)
+            pos_desc = "🔴低" if pos < 30 else ("🟢高" if pos > 70 else "🟡中")
+            close_pct = r.get("close_pct_short", 0)
+            pct_desc = f"{'▲' if close_pct > 0 else '▼'}{abs(close_pct):.1f}%"
+            action = _get_action_short(r)
+
+            lines.append(f"| {name} | {score:.0f} | {rsi_emoji}{rsi:.0f} | {kdj_emoji}{kdj_k:.0f} | {macd_emoji} | {vol_emoji}{vol_ratio:.1f}x | {pos_desc}{pos:.0f}% | {pct_desc} | {action} |")
+
+        lines.append("")
+
+    # 危险标的矩阵
+    if danger_signals:
+        lines.append("---\n")
+        lines.append("## 🔴 危险标的矩阵\n")
+        lines.append("| ETF | 评分 | RSI | KDJ | MACD | 量能 | 位置 | 偏离度 | 操作 |")
+        lines.append("|:----|:----:|:---:|:---:|:----:|:----:|:----:|:------:|:----:|")
+
+        for r in danger_signals:
+            name = r.get('etf_name', '')[:8]
+            score = r.get("pattern_score", 0)
+            rsi = r.get("rsi14", 50)
+            rsi_emoji = "🔴" if rsi < 30 else ("🟢" if rsi > 70 else "🟡")
+            kdj_k = r.get("kdj_k", 0)
+            kdj_emoji = "🔴" if kdj_k < 20 else ("🟢" if kdj_k > 80 else "🟡")
+            macd_hist = r.get("macd_hist", 0)
+            macd_emoji = "🟢" if macd_hist > 0 else "🔴"
+            vol_ratio = r.get("vol_ratio", 1)
+            vol_emoji = "📈" if vol_ratio > 1.2 else ("📉" if vol_ratio < 0.8 else "➡️")
+            pos = r.get("price_pos_60d", 50)
+            pos_desc = "🔴低" if pos < 30 else ("🟢高" if pos > 70 else "🟡中")
+            close_pct = r.get("close_pct_short", 0)
+            pct_desc = f"{'▲' if close_pct > 0 else '▼'}{abs(close_pct):.1f}%"
+            action = _get_action_short(r)
+
+            lines.append(f"| {name} | {score:.0f} | {rsi_emoji}{rsi:.0f} | {kdj_emoji}{kdj_k:.0f} | {macd_emoji} | {vol_emoji}{vol_ratio:.1f}x | {pos_desc}{pos:.0f}% | {pct_desc} | {action} |")
+
+        lines.append("")
+
+    # 均线对比
+    lines.append("---\n")
+    lines.append("## 📊 均线对比\n")
+    lines.append("| ETF | MA5 | MA10 | MA20 | MA60 | 均线状态 |")
+    lines.append("|:----|:---:|:----:|:----:|:----:|:--------:|")
+
+    for r in sorted_results:
+        name = r.get('etf_name', '')[:8]
+        ma5 = r.get("ma5", 0)
+        ma10 = r.get("ma10", 0)
+        ma20 = r.get("ma20", 0)
+        ma60 = r.get("ma60", 0)
+        ma_pattern = r.get("ma_pattern", "纠缠")[:6]
+
+        lines.append(f"| {name} | {ma5:.2f} | {ma10:.2f} | {ma20:.2f} | {ma60:.2f} | {ma_pattern} |")
+
+    lines.append("")
+
+    # 知行信号对比
+    lines.append("---\n")
+    lines.append("## 📉 知行信号对比\n")
+    lines.append("| ETF | 白线(EMA) | 黄线(均线组) | 三线位置 | 偏离变化 |")
+    lines.append("|:----|:---------:|:------------:|:--------:|:--------:|")
+
+    for r in sorted_results:
+        name = r.get('etf_name', '')[:8]
+        zx_short = r.get("zx_short", 0)
+        zx_long = r.get("zx_long", 0)
+        line_pos = r.get("line_position", "纠缠")[:8]
+        deviation_change = r.get("close_deviation_change", 0)
+        change_emoji = "📈" if deviation_change > 0.5 else ("📉" if deviation_change < -0.5 else "➡️")
+
+        lines.append(f"| {name} | {zx_short:.4f} | {zx_long:.4f} | {line_pos} | {change_emoji}{deviation_change:+.2f}% |")
+
+    lines.append("")
+
+    # 异常信号汇总
+    abnormal_all = []
+    for r in results:
+        abnormal = r.get("abnormal_signals", [])
+        for sig in abnormal:
+            abnormal_all.append({
+                "etf": r.get("etf_name", ""),
+                "type": sig.get("type", ""),
+                "desc": sig.get("description", ""),
+                "severity": sig.get("severity", ""),
+            })
+
+    if abnormal_all:
+        lines.append("---\n")
+        lines.append("## ⚠️ 异常信号汇总\n")
+        lines.append("| ETF | 异常类型 | 描述 | 级别 |")
+        lines.append("|:----|:--------|:-----|:----:|")
+
+        for sig in abnormal_all:
+            emoji = "🔴" if sig["severity"] == "warning" else ("🟡" if sig["severity"] == "positive" else "🟢")
+            lines.append(f"| {sig['etf'][:8]} | {sig['type']} | {sig['desc'][:20]} | {emoji} |")
+
+        lines.append("")
+
+    # 风险提示
+    lines.append("---\n")
+    lines.append("**⚠️ 风险提示**: 本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。\n")
+    lines.append(f"\n*报告生成时间: {now}*")
+
+    return "\n".join(lines)
+
+
+def _get_action_short(r: dict) -> str:
+    """获取简短操作建议"""
+    sig = r.get("signal", "")
+    rsi = r.get("rsi14", 50)
+    pos = r.get("price_pos_60d", 50)
+
+    if sig == "STRONG":
+        if rsi > 70:
+            return "持有/减仓"
+        elif rsi < 30:
+            return "加仓机会"
+        else:
+            return "持有"
+    elif sig == "WATCH":
+        if rsi < 30:
+            return "关注"
+        else:
+            return "观望"
+    else:  # DANGER
+        if rsi < 30:
+            return "等待"
+        elif pos < 40:
+            return "关注"
+        else:
+            return "减仓"
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="持仓ETF分析报告生成器")
+    parser.add_argument("--mode", "-m", default="compact",
+                        choices=["compact", "classic", "card", "chart", "radar", "matrix"],
+                        help="报告模式: compact(精简) | classic(经典详表) | card(卡片式) | chart(图表可视化) | radar(多维雷达) | matrix(对比矩阵)")
+    parser.add_argument("--positions", "-p", default="./positions.json",
+                        help="持仓配置文件路径")
+    parser.add_argument("--output", "-o", default=None,
+                        help="输出文件路径")
+    args = parser.parse_args()
+
     print(f"\n{'='*60}")
-    print(f"📊 持仓ETF详细分析报告")
+    print(f"📊 持仓ETF分析报告 ({args.mode} 模式)")
     print(f"{'='*60}\n")
 
+    # 模式说明
+    mode_descriptions = {
+        "compact": "精简模式：ASCII图表+信号分布图",
+        "classic": "经典模式：完整技术指标表格",
+        "card": "卡片模式：每只ETF卡片式展示",
+        "chart": "图表模式：ASCII可视化图表",
+        "radar": "雷达模式：多维度评分对比",
+        "matrix": "矩阵模式：多维度横向对比",
+    }
+    print(f"📋 模式说明: {mode_descriptions.get(args.mode, '')}\n")
+
     # 加载持仓
-    positions_file = "./positions.json"
+    positions_file = args.positions
     if os.path.exists(positions_file):
         with open(positions_file, 'r', encoding='utf-8') as f:
             positions = json.load(f)
@@ -787,16 +1465,25 @@ def main():
     # 生成报告
     beijing_tz = timezone(timedelta(hours=8))
     date_str = datetime.now(beijing_tz).strftime("%Y-%m-%d")
-    output_path = f"./portfolio_report_{date_str}.md"
 
-    md = generate_md_report(results, output_path)
+    if args.output:
+        output_path = args.output
+    else:
+        output_path = f"./portfolio_report_{date_str}_{args.mode}.md"
+
+    md = generate_report(results, mode=args.mode, output_path=output_path)
     print(f"\n📄 报告已保存: {output_path}")
-
-    # 创建飞书文档
-    doc_id, doc_url = create_feishu_doc(output_path)
-
-    # 发送到飞书（传入 results 生成精简消息）
-    send_to_feishu(output_path, doc_url, results)
+    print(f"\n📊 报告预览 (前100行):")
+    print("-" * 60)
+    for line in md.split('\n')[:100]:
+        print(line)
+    print("-" * 60)
+    print(f"\n💡 如需生成其他模式报告，使用:")
+    print(f"   python -m market_monitor.report.portfolio_analyzer --mode classic")
+    print(f"   python -m market_monitor.report.portfolio_analyzer --mode card")
+    print(f"   python -m market_monitor.report.portfolio_analyzer --mode chart")
+    print(f"   python -m market_monitor.report.portfolio_analyzer --mode radar")
+    print(f"   python -m market_monitor.report.portfolio_analyzer --mode matrix")
 
 
 def create_feishu_doc(md_file_path: str) -> tuple:
@@ -835,7 +1522,7 @@ def create_feishu_doc(md_file_path: str) -> tuple:
 
 
 def build_summary_message(results: list, doc_url: str = None) -> str:
-    """构建中等版精简消息"""
+    """构建中等版精简消息 - 按信号颜色分类"""
     lines = []
 
     # 分类统计
@@ -847,24 +1534,26 @@ def build_summary_message(results: list, doc_url: str = None) -> str:
     total = len(results)
     lines.append(f"📊 **持仓汇总**: {total} 只 | 🟢强势{len(strong_signals)} | 🟡观望{len(watch_signals)} | 🔴危险{len(danger_signals)}")
 
-    # 操作建议
-    lines.append("")
-    lines.append("### 🟢 强势标的")
+    # 🟢 强势标的
     if strong_signals:
-        for r in strong_signals[:3]:  # 最多3只
-            action = _get_action(r)
-            lines.append(f"- **{r.get('etf_name', '')}**: {action}")
-    else:
-        lines.append("- 暂无")
+        lines.append("")
+        lines.append("### 🟢 强势标的")
+        names = [r.get('etf_name', '') for r in strong_signals]
+        lines.append(f"- {', '.join(names)}")
 
-    lines.append("")
-    lines.append("### 🔴 危险标的")
+    # 🟡 观望标的
+    if watch_signals:
+        lines.append("")
+        lines.append("### 🟡 观望标的")
+        names = [r.get('etf_name', '') for r in watch_signals]
+        lines.append(f"- {', '.join(names)}")
+
+    # 🔴 危险标的
     if danger_signals:
-        for r in danger_signals[:3]:  # 最多3只
-            action = _get_action(r)
-            lines.append(f"- **{r.get('etf_name', '')}**: {action}")
-    else:
-        lines.append("- 暂无")
+        lines.append("")
+        lines.append("### 🔴 危险标的")
+        names = [r.get('etf_name', '') for r in danger_signals]
+        lines.append(f"- {', '.join(names)}")
 
     return "\n".join(lines)
 

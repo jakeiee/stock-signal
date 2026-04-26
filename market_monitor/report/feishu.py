@@ -20,6 +20,7 @@ from typing import Optional
 from ..config import FEISHU_WEBHOOK
 from ..data_sources.trendonify import fetch_trendonify_valuation
 from .valuation_image import generate_valuation_image
+from .global_valuation_card import fetch_enhanced_global_valuation
 
 # LLM 解析模块
 try:
@@ -841,6 +842,65 @@ def _policy_kpi_block(pol_dim: dict) -> str:
     return "\n".join(lines)
 
 
+def _convert_enhanced_to_img_format(enhanced_data):
+    """
+    Convert enhanced global valuation data to the format expected by generate_valuation_image().
+    
+    Args:
+        enhanced_data: Output of fetch_enhanced_global_valuation()
+        
+    Returns:
+        dict in new format: {
+            "date": str, 
+            "sources": list,
+            "markets": {
+                "US": {"name": "美股", "indices": [{"name": "标普500", "pe": 27.24, "pct_10y": 28.9}, ...]},
+                ...
+            }
+        }
+    """
+    result = {
+        "date": enhanced_data.get("date", ""),
+        "sources": enhanced_data.get("sources", []),
+        "markets": {},
+    }
+    
+    markets = enhanced_data.get("markets", {})
+    
+    # 市场名称映射
+    market_names = {
+        "US": "美股",
+        "HK": "港股",
+        "JP": "日股",
+        "KR": "韩股",
+    }
+    
+    # For each market, include ALL indices
+    for market_code in ["US", "HK", "JP", "KR"]:
+        market_data = markets.get(market_code, {})
+        indices = market_data.get("indices", [])
+        
+        if indices:
+            # 过滤出有PE数据的指数
+            valid_indices = []
+            for idx in indices:
+                pe = idx.get("pe")
+                if pe is not None:
+                    valid_indices.append({
+                        "name": idx.get("name", "未知"),
+                        "pe": pe,
+                        "pct_10y": idx.get("pct_10y"),
+                    })
+            
+            if valid_indices:
+                result["markets"][market_code] = {
+                    "name": market_names.get(market_code, market_code),
+                    "indices": valid_indices,
+                }
+    
+    return result
+
+
 def _glb_kpi_block(glb_dim: dict) -> tuple:
     """全球市场指标详情块（飞书 lark_md 格式）。
     
@@ -855,21 +915,16 @@ def _glb_kpi_block(glb_dim: dict) -> tuple:
     img_key = None  # 飞书图片key
 
     # ─────────────────────────────────────────────────────
-    # Trendonify 风格：PE 百分位 + 估值评级
-    # 数据来源: https://trendonify.com/pe-ratio
+    # 增强版全球估值数据（多数据源）
+    # 数据来源: Shiller/Yale, WorldPERatio, 亿牛网, 雪球基金, trendonify
     # 估值评级: 0-20%有吸引力 21-40%低估 41-60%合理 61-80%高估 81-100%昂贵
     # ─────────────────────────────────────────────────────
     
-    # 动态获取 Trendonify PE 百分位数据
-    _trendonify_data = fetch_trendonify_valuation()
-    _PE_DATA = {
-        "US":   _trendonify_data.get("US", {}),
-        "HK":   _trendonify_data.get("HK", {}),
-        "JP":   _trendonify_data.get("JP", {}),
-        "KR":   _trendonify_data.get("KR", {}),
-    }
-    _trendonify_date = _trendonify_data.get("date", "")
-    _trendonify_note = _trendonify_data.get("note", "")
+    # 获取增强版全球估值数据
+    _enhanced_data = fetch_enhanced_global_valuation()
+    _valuation_img_data = _convert_enhanced_to_img_format(_enhanced_data)
+    _enhanced_date = _enhanced_data.get("date", "")
+    _sources = _enhanced_data.get("sources", [])
 
     def _valuation_icon(pct):
         """根据10年百分位返回估值图标和文字"""
@@ -880,32 +935,27 @@ def _glb_kpi_block(glb_dim: dict) -> tuple:
         if pct >= 41:   return "🟡", "合理"
         if pct >= 21:   return "🟢", "低估"
         return "🟢🟢", "有吸引力"
-
+    
     def _chg_arrow(chg):
         if chg is None: return ""
         if chg >= 3:    return f" **5日{chg:+.1f}%**"
         if chg <= -3:   return f" **5日{chg:+.1f}%**"
         return f" 5日{chg:+.1f}%"
-
+    
     # ─────────────────────────────────────────────────────
-    # 🌏 全球市场估值概览（Trendonify 风格）
+    # 🌏 全球市场估值概览（增强版）
     # ─────────────────────────────────────────────────────
-    # 只显示标题和日期，表格数据在图片中展示
-    date_info = f" [{_trendonify_date}]" if _trendonify_date else ""
-    lines.append(f"**🌏 全球市场估值** [数据源: Trendonify]{date_info}")
+    # 显示标题和日期，表格数据在图片中展示
+    date_info = f" [{_enhanced_date}]" if _enhanced_date else ""
+    sources_str = ", ".join(_sources) if _sources else "多数据源"
+    lines.append(f"**🌏 全球市场估值** [数据源: {sources_str}]{date_info}")
     lines.append("")
-
+    
     # ─────────────────────────────────────────────────────
     # 生成估值图片
     # ─────────────────────────────────────────────────────
-    # 构建估值图片数据
-    valuation_img_data = {
-        "date": _trendonify_date,
-        "US": _PE_DATA.get("US", {}),
-        "HK": _PE_DATA.get("HK", {}),
-        "JP": _PE_DATA.get("JP", {}),
-        "KR": _PE_DATA.get("KR", {}),
-    }
+    # 使用转换后的增强数据
+    valuation_img_data = _valuation_img_data
     
     # 生成图片
     img_path = generate_valuation_image(valuation_img_data)
@@ -922,15 +972,21 @@ def _glb_kpi_block(glb_dim: dict) -> tuple:
             return "\n".join(lines), img_key
     
     # 图片上传失败或未生成图片，使用简化表格形式
-    lines.append("| 市场 | PE | 10年%位 | 估值 |")
-    lines.append("|------|-----|---------|------|")
-    for market, name, ticker in [("US", "🇺🇸 美股", "SPX"), ("HK", "🇭🇰 港股", "HSI"), 
-                                   ("JP", "🇯🇵 日股", "EWJ"), ("KR", "🇰🇷 韩股", "EWY")]:
-        data = _PE_DATA.get(market, {})
-        pe = data.get("pe", "--")
-        pct = data.get("pct_10y", "--")
-        icon, label = _valuation_icon(pct)
-        lines.append(f"| {name} | {pe} | {pct}% | {icon}{label} |")
+    lines.append("| 市场 | 指数 | PE | 10年%位 | 估值 |")
+    lines.append("|------|------|-----|---------|------|")
+    
+    # 使用新格式遍历所有市场的所有指数
+    markets_data = valuation_img_data.get("markets", {})
+    for market_code, market_info in markets_data.items():
+        market_name = market_info.get("name", market_code)
+        indices = market_info.get("indices", [])
+        
+        for idx in indices:
+            index_name = idx.get("name", "未知")
+            pe = idx.get("pe", "--")
+            pct = idx.get("pct_10y", "--")
+            icon, label = _valuation_icon(pct)
+            lines.append(f"| {market_name} | {index_name} | {pe} | {pct}% | {icon}{label} |")
     
     return "\n".join(lines), None
 

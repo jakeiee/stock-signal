@@ -13,6 +13,26 @@ build/
 ### 保护：重要备份文件（不提交到git） ###
 protected_data_sources/
 
+### 个人数据（不提交） ###
+trading_log.json
+trading_log.csv
+positions.json
+
+### 数据缓存（不提交） ###
+*.csv
+*.json
+!requirements.txt
+
+### 飞书报告临时文件（不提交） ###
+feishu_doc_*.xml
+feishu_portfolio_report*.xml
+feishu_professional_report.xml
+portfolio_report_*.md
+dividend_report.md
+
+### 截图和图表（不提交） ###
+*.png
+
 ### AL ###
 #Template for AL projects for Dynamics 365 Business Central
 #launch.json folder
