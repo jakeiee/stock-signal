@@ -346,3 +346,23 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 - Tags: automatic, learning, dividend_monitor
 
 ---
+
+## [LRN-20260427-001] best_practice (dividend_monitor)
+
+**Logged**: 2026-04-27T00:02:17.671135
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送成功
+
+### Details
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-27 00:02
+
+### Metadata
+- Module: dividend_monitor
+- Source: automatic_tracking
+- Tags: automatic, learning, dividend_monitor
+
+---

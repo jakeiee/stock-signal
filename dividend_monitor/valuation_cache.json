@@ -15,7 +15,7 @@
     "launch_short_history": false,
     "source": "wind_app",
     "wind_app_data_quality": "A级（专业源完整历史）",
-    "updated_at": "2026-04-14 14:35:10"
+    "updated_at": "2026-04-27 00:02:02"
   },
   "931446": {
     "date": "2026-03-31",
@@ -33,7 +33,7 @@
     "launch_short_history": false,
     "source": "wind_app",
     "wind_app_data_quality": "A级（专业源完整历史）",
-    "updated_at": "2026-04-14 14:35:10"
+    "updated_at": "2026-04-27 00:02:02"
   },
   "h30269": {
     "date": "2026-03-31",
@@ -51,6 +51,24 @@
     "launch_short_history": false,
     "source": "wind_app",
     "wind_app_data_quality": "A级（专业源完整历史）",
-    "updated_at": "2026-04-14 14:35:10"
+    "updated_at": "2026-04-27 00:02:02"
+  },
+  "000985": {
+    "date": "2026-04-18",
+    "div": 1.35,
+    "div_pct": 65.39,
+    "pe": 43.03,
+    "pe_pct": 72.93,
+    "risk_free_rate": 1.8,
+    "risk_premium": null,
+    "hist_start": "2006-01-04",
+    "hist_years": 20.3,
+    "hist_days": 4872,
+    "launch_date": "2006-01-04",
+    "launch_years": 20.3,
+    "launch_short_history": false,
+    "source": "wind_app",
+    "wind_app_data_quality": "A级（专业源完整历史）",
+    "updated_at": "2026-04-27 00:02:02"
   }
 }
