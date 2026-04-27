@@ -243,12 +243,13 @@ class GenerateReportStep(Step):
 
 
 class FeishuPushStep(Step):
-    """Step 5: 飞书推送"""
+    """Step 5: 飞书推送（知行信号分类卡片）"""
     
-    def __init__(self, report_key: str = "report_path"):
+    def __init__(self, results_key: str = "etf_analysis", doc_url: str = None):
         super().__init__()
         self.name = "feishu_push"
-        self.report_key = report_key
+        self.results_key = results_key
+        self.doc_url = doc_url
     
     def validate(self) -> bool:
         return True
@@ -265,37 +266,89 @@ class FeishuPushStep(Step):
                     error="飞书 Webhook 未配置"
                 )
             
-            report_path = ctx.get(self.report_key)
-            if not report_path or not os.path.exists(report_path):
+            results = ctx.get(self.results_key, [])
+            if not results:
                 return StepResult(
                     step_name=self.name,
                     status=StepStatus.SKIPPED.value,
-                    error="报告文件不存在"
+                    error="无分析结果"
                 )
             
-            with open(report_path, 'r', encoding='utf-8') as f:
-                md_content = f.read()
+            # 按知行信号分类
+            strong = [r for r in results if r.get("signal") == "STRONG"]
+            watch = [r for r in results if r.get("signal") == "WATCH"]
+            danger = [r for r in results if r.get("signal") == "DANGER"]
             
-            # 限制长度
-            max_len = 4000
-            if len(md_content) > max_len:
-                md_content = md_content[:max_len] + "\n\n...（内容过长，已截断）"
+            # 构建消息内容
+            content_lines = []
+            content_lines.append(f"**持仓概览** | {len(results)}只ETF | 🟢强势{len(strong)} | 🟡观望{len(watch)} | 🔴危险{len(danger)}")
+            content_lines.append("")
+            
+            # 🟢 强势
+            if strong:
+                content_lines.append("**🟢 知行强势（白>黄，收在白线上）**")
+                for r in strong:
+                    rsi = r.get('rsi14', 50)
+                    rsi_status = "超买" if rsi > 70 else ("超卖" if rsi < 30 else "中性")
+                    content_lines.append(f"• {r.get('etf_name', '')} | RSI={rsi:.0f} {rsi_status}")
+                content_lines.append("")
+            
+            # 🟡 观望
+            if watch:
+                content_lines.append("**🟡 知行观望（白>黄，收在白线下）**")
+                for r in watch:
+                    rsi = r.get('rsi14', 50)
+                    pos = r.get('price_pos_60d', 50)
+                    pos_status = "低位" if pos < 30 else ("高位" if pos > 70 else "中性")
+                    content_lines.append(f"• {r.get('etf_name', '')} | RSI={rsi:.0f} | {pos_status}")
+                content_lines.append("")
+            
+            # 🔴 危险
+            if danger:
+                content_lines.append("**🔴 知行危险（白<黄，空头排列）**")
+                for r in danger:
+                    pos = r.get('price_pos_60d', 50)
+                    pos_status = "低位" if pos < 30 else ("高位" if pos > 70 else "中性")
+                    content_lines.append(f"• {r.get('etf_name', '')} | {pos_status}")
+            
+            content = "\n".join(content_lines)
             
             # 构建卡片
+            elements = [
+                {'tag': 'hr'},
+                {'tag': 'div', 'text': {'tag': 'lark_md', 'content': content}}
+            ]
+            
+            # 添加文档链接按钮
+            if self.doc_url:
+                elements.append({
+                    'tag': 'action',
+                    'actions': [{
+                        'tag': 'button',
+                        'text': {'tag': 'plain_text', 'content': '📄 查看完整报告'},
+                        'type': 'primary',
+                        'url': self.doc_url
+                    }]
+                })
+            
+            elements.append({
+                'tag': 'note',
+                'elements': [{'tag': 'plain_text', 'content': '⚠️ 本报告仅供参考，不构成投资建议'}]
+            })
+            
+            beijing_tz = timezone(timedelta(hours=8))
+            date_str = datetime.now(beijing_tz).strftime("%Y-%m-%d")
+            
             payload = {
                 "msg_type": "interactive",
                 "card": {
                     "config": {"wide_screen_mode": True},
                     "header": {
-                        "title": {"tag": "plain_text", "content": "📊 持仓分析报告"},
+                        "title": {"tag": "plain_text", "content": "📊 ETF持仓分析报告"},
+                        "subtitle": {"tag": "plain_text", "content": f"{date_str} | 知行信号分类"},
                         "template": "blue"
                     },
-                    "elements": [
-                        {"tag": "div", "text": {"tag": "lark_md", "content": md_content}},
-                        {"tag": "note", "elements": [
-                            {"tag": "plain_text", "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
-                        ]}
-                    ]
+                    "elements": elements
                 }
             }
             

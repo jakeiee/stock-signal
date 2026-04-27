@@ -20,13 +20,13 @@ import xalpha as xa
 
 # ── ETF指数映射表（从 etf_index_mapping.csv 加载）─────────────────────────────
 ETF_MAPPING = {
-    "513130": {"name": "恒生互联网ETF", "index": "HKHSIII", "index_name": "恒生互联网科技业指数"},
-    "159890": {"name": "软件ETF嘉实", "index": "ZZ930601", "index_name": "中证软件服务指数"},
-    "588260": {"name": "科创板50ETF", "index": "SH000688", "index_name": "科创50指数"},
-    "562800": {"name": "机器人ETF华夏", "index": "ZZH30590", "index_name": "中证机器人指数"},
-    "159567": {"name": "港股通创新药ETF", "index": "GZ987018", "index_name": "恒生医疗保健指数"},
-    "516010": {"name": "游戏ETF华夏", "index": "ZZ930901", "index_name": "中证游戏产业指数"},
-    "513020": {"name": "港股通科技ETF", "index": "HKHSTECH", "index_name": "恒生科技指数"},
+    "159202": {"name": "恒生互联网ETF", "index": "HKHSIII", "index_name": "恒生互联网科技业指数"},
+    "159852": {"name": "软件ETF嘉实", "index": "ZZ930601", "index_name": "中证软件服务指数"},
+    "506008": {"name": "科创板长城", "index": "SH000688", "index_name": "科创50指数"},
+    "562500": {"name": "机器人ETF华夏", "index": "ZZH30590", "index_name": "中证机器人指数"},
+    "159217": {"name": "港股通创新药ETF", "index": "GZ987018", "index_name": "恒生医疗保健指数"},
+    "159869": {"name": "游戏ETF华夏", "index": "ZZ930901", "index_name": "中证游戏产业指数"},
+    "513180": {"name": "恒生科技ETF华夏", "index": "HKHSTECH", "index_name": "恒生科技指数"},
 }
 
 # ── 数据获取 ──────────────────────────────────────────────────────────────────

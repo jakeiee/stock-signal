@@ -59,13 +59,13 @@ jobs:
           FEISHU_CHAT_ID = ""
           EOF
 
-      - name: 执行持仓分析（带重试机制）
+      - name: 执行持仓分析（带重试机制 + 飞书推送）
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
           retry_wait_seconds: 60
-          command: python market_monitor/report/portfolio_analyzer.py
+          command: python market_monitor/report/portfolio_professional.py --feishu
 
       - name: 上传报告
         uses: actions/upload-artifact@v4

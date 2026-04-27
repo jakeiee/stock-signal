@@ -304,14 +304,15 @@ class TerminalOutputStep(Step):
 
 
 class FeishuPushStep(Step):
-    """Step 4: 飞书推送"""
+    """Step 4: 飞书推送（简洁卡片格式）"""
     
-    def __init__(self, report_key: str = "selector_report"):
+    def __init__(self, report_key: str = "selector_report", doc_url: str = None):
         super().__init__(
             name="feishu_push",
             description="推送选股结果到飞书"
         )
         self.report_key = report_key
+        self.doc_url = doc_url
     
     def validate(self) -> bool:
         return True
@@ -336,21 +337,40 @@ class FeishuPushStep(Step):
                     message="无选股报告"
                 )
             
+            # 构建元素
+            elements = [
+                {'tag': 'hr'},
+                {'tag': 'div', 'text': {'tag': 'lark_md', 'content': report.get("content", "暂无数据")}}
+            ]
+            
+            # 添加文档链接按钮
+            if self.doc_url:
+                elements.append({
+                    'tag': 'action',
+                    'actions': [{
+                        'tag': 'button',
+                        'text': {'tag': 'plain_text', 'content': '📄 查看完整报告'},
+                        'type': 'primary',
+                        'url': self.doc_url
+                    }]
+                })
+            
+            elements.append({
+                'tag': 'note',
+                'elements': [{'tag': 'plain_text', 'content': '⚠️ 本报告仅供参考，不构成投资建议'}]
+            })
+            
             # 构建卡片
             payload = {
                 "msg_type": "interactive",
                 "card": {
                     "config": {"wide_screen_mode": True},
                     "header": {
-                        "title": {"tag": "plain_text", "content": report.get("title", "选股建议")},
+                        "title": {"tag": "plain_text", "content": report.get("title", "🎯 选股建议")},
+                        "subtitle": {"tag": "plain_text", "content": datetime.now().strftime("%Y-%m-%d")},
                         "template": "green"
                     },
-                    "elements": [
-                        {"tag": "div", "text": {"tag": "lark_md", "content": report.get("content", "暂无数据")}},
-                        {"tag": "note", "elements": [
-                            {"tag": "plain_text", "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
-                        ]}
-                    ]
+                    "elements": elements
                 }
             }
             
