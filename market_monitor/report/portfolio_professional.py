@@ -29,7 +29,286 @@ import tushare as ts
 import warnings
 warnings.filterwarnings('ignore')
 
-from market_monitor.report.portfolio_analyzer import ETF_MAPPING, analyze_etf
+# ── ETF指数映射表（从 etf_index_mapping.csv 加载）─────────────────────────────
+ETF_MAPPING = {
+    "159202": {"name": "恒生互联网ETF", "index": "HKHSIII", "index_name": "恒生互联网科技业指数"},
+    "159852": {"name": "软件ETF嘉实", "index": "ZZ930601", "index_name": "中证软件服务指数"},
+    "506008": {"name": "科创板长城", "index": "SH000688", "index_name": "科创50指数"},
+    "562500": {"name": "机器人ETF华夏", "index": "ZZH30590", "index_name": "中证机器人指数"},
+    "159217": {"name": "港股通创新药ETF", "index": "GZ987018", "index_name": "恒生医疗保健指数"},
+    "159869": {"name": "游戏ETF华夏", "index": "ZZ930901", "index_name": "中证游戏产业指数"},
+    "513180": {"name": "恒生科技ETF华夏", "index": "HKHSTECH", "index_name": "恒生科技指数"},
+    "513090": {"name": "香港证券ETF易方达", "index": "ZZ930709", "index_name": "中证香港证券指数"},
+}
+
+# ── 数据获取 ──────────────────────────────────────────────────────────────────
+
+def get_index_data(index_code_xalpha: str) -> pd.DataFrame:
+    """使用 xalpha 获取指数历史数据"""
+    try:
+        info = xa.indexinfo(code=index_code_xalpha)
+        df = info.price.copy()
+
+        if "date" not in df.columns:
+            df = df.reset_index()
+        df.columns = [c.lower() for c in df.columns]
+
+        # 补全缺失列
+        if "high" not in df.columns:
+            df["high"] = df["close"]
+        if "low" not in df.columns:
+            df["low"] = df["close"]
+        if "open" not in df.columns:
+            df["open"] = df["close"]
+        if "volume" not in df.columns:
+            df["volume"] = 0.0
+
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
+        return df
+    except Exception as e:
+        print(f"  [错误] 获取 {index_code_xalpha} 数据失败: {e}")
+        return pd.DataFrame()
+
+
+def calculate_technical(df: pd.DataFrame) -> pd.DataFrame:
+    """计算技术指标"""
+    if df.empty or len(df) < 60:
+        return df
+
+    result = df.copy()
+    close = result["close"]
+
+    # 均线
+    result["ma5"] = close.rolling(window=5, min_periods=1).mean()
+    result["ma10"] = close.rolling(window=10, min_periods=1).mean()
+    result["ma14"] = close.rolling(window=14, min_periods=1).mean()
+    result["ma20"] = close.rolling(window=20, min_periods=1).mean()
+    result["ma28"] = close.rolling(window=28, min_periods=1).mean()
+    result["ma57"] = close.rolling(window=57, min_periods=1).mean()
+    result["ma60"] = close.rolling(window=60, min_periods=1).mean()
+    result["ma114"] = close.rolling(window=114, min_periods=1).mean()
+
+    # 知行趋势线
+    # 短线: EMA(EMA(close,10),10) - 10日EMA的双重平滑
+    ema10 = close.ewm(span=10, adjust=False).mean()
+    result["zx_short"] = ema10.ewm(span=10, adjust=False).mean()
+    # 长线: (MA14+MA28+MA57+MA114)/4 - 4条均线的平均
+    result["zx_long"] = (result["ma14"] + result["ma28"] + result["ma57"] + result["ma114"]) / 4
+
+    # KDJ
+    low14 = result["low"].rolling(window=9, min_periods=1).min()
+    high14 = result["high"].rolling(window=9, min_periods=1).max()
+    diff = (high14 - low14).replace(0, 0.001)
+    rsv = ((close - low14) / diff * 100).fillna(50)
+    result["kdj_k"] = rsv.ewm(alpha=1/3, adjust=False).mean()
+    result["kdj_d"] = result["kdj_k"].ewm(alpha=1/3, adjust=False).mean()
+    result["kdj_j"] = 3 * result["kdj_k"] - 2 * result["kdj_d"]
+
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    result["macd_diff"] = ema12 - ema26
+    result["macd_dea"] = result["macd_diff"].ewm(span=9, adjust=False).mean()
+    result["macd_hist"] = (result["macd_diff"] - result["macd_dea"]) * 2
+
+    # RSI
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = (-delta).where(delta < 0, 0)
+    avg_gain = gain.rolling(window=14, min_periods=1).mean()
+    avg_loss = loss.rolling(window=14, min_periods=1).mean()
+    rs = avg_gain / avg_loss.replace(0, 0.001)
+    result["rsi14"] = 100 - (100 / (1 + rs))
+
+    # 成交量
+    result["ma_vol_5"] = result["volume"].rolling(window=5, min_periods=1).mean()
+    result["ma_vol_60"] = result["volume"].rolling(window=60, min_periods=1).mean()
+    result["vol_ratio"] = result["volume"] / result["ma_vol_5"].shift(1).replace(0, 1)
+    result["price_change"] = close.pct_change()
+    result["vol_match"] = (
+        ((result["price_change"] > 0) & (result["vol_ratio"] > 1.0)) |
+        ((result["price_change"] < 0) & (result["vol_ratio"] < 1.0))
+    )
+
+    # 价格位置
+    rolling_high = close.rolling(window=60, min_periods=20).max()
+    rolling_low = close.rolling(window=60, min_periods=20).min()
+    result["price_pos_60d"] = (close - rolling_low) / (rolling_high - rolling_low).replace(0, 1) * 100
+
+    return result
+
+
+def analyze_etf(etf_code: str, etf_name: str, index_code: str, index_name: str) -> Dict:
+    """分析单只ETF"""
+    print(f"  [{etf_code}] {etf_name} -> {index_name}")
+
+    # 获取数据
+    df = get_index_data(index_code)
+    if df.empty:
+        return None
+
+    # 计算技术指标
+    df = calculate_technical(df)
+    if len(df) < 60:
+        return None
+
+    latest = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else latest
+
+    # 知行趋势线
+    short_trend = latest.get("zx_short", 0)   # EMA(EMA(close,10),10)
+    long_trend = latest.get("zx_long", 0)     # (MA14+MA28+MA57+MA114)/4
+    close_price = latest.get("close", 0)
+
+    # 前一天数据（用于计算偏离变化）
+    prev_short = prev.get("zx_short", 0)
+    prev_long = prev.get("zx_long", 0)
+    prev_close = prev.get("close", 0)
+
+    # 信号判断（按您的公式）
+    # 强势：短线 > 长线 且 收盘价 > 短线
+    # 观望：短线 > 长线 且 收盘价 < 短线
+    # 危险：短线 < 长线 或 收盘价 < 长线
+    if short_trend > long_trend and close_price > short_trend:
+        signal = "STRONG"       # 强势
+    elif short_trend > long_trend and close_price <= short_trend:
+        signal = "WATCH"        # 观望
+    else:
+        signal = "DANGER"       # 危险
+
+    # 排列状态
+    if short_trend > long_trend:
+        position = "短线在长线之上"
+    else:
+        position = "短线在长线之下"
+
+    # 偏离比例计算
+    close_pct_short = ((close_price / short_trend) - 1) * 100 if short_trend != 0 else 0
+    close_pct_long = ((close_price / long_trend) - 1) * 100 if long_trend != 0 else 0
+    short_pct_long = ((short_trend / long_trend) - 1) * 100 if long_trend != 0 else 0
+
+    # 前一天偏离度（用于判断偏离变化）
+    prev_close_pct_short = ((prev_close / prev_short) - 1) * 100 if prev_short != 0 else 0
+    close_deviation_change = close_pct_short - prev_close_pct_short  # 正=偏离扩大，负=偏离缩小
+
+    # 三线位置关系（复合描述用）
+    if close_price > short_trend > long_trend:
+        line_position = "收盘>白线>黄线（三线多头）"
+    elif short_trend > close_price > long_trend:
+        line_position = "白线>收盘>黄线（偏弱反弹）"
+    elif close_price > long_trend > short_trend:
+        line_position = "收盘>黄线>白线（反弹整理）"
+    elif long_trend > short_trend > close_price:
+        line_position = "黄线>白线>收盘（空头排列）"
+    elif long_trend > close_price > short_trend:
+        line_position = "黄线>收盘>白线（弱势）"
+    elif short_trend > long_trend > close_price:
+        line_position = "白线>黄线>收盘（偏弱）"
+    else:
+        line_position = "三线纠缠"
+
+    # 均线排列判断
+    ma5 = latest.get("ma5", 0)
+    ma10 = latest.get("ma10", 0)
+    ma20 = latest.get("ma20", 0)
+    ma60 = latest.get("ma60", 0)
+    if ma5 > ma10 > ma20 > ma60:
+        ma_pattern = "多头排列（强势上涨）"
+    elif ma5 < ma10 < ma20 < ma60:
+        ma_pattern = "空头排列（弱势下跌）"
+    elif ma5 > ma20 and ma10 > ma20:
+        ma_pattern = "偏多整理"
+    elif ma5 < ma20 and ma10 < ma20:
+        ma_pattern = "偏空整理"
+    else:
+        ma_pattern = "均线纠缠"
+
+    # 异常量能
+    abnormal = []
+    price_pos = latest.get("price_pos_60d", 50)
+    is_huge = latest.get("vol_ratio", 1) > 3
+
+    if is_huge and price_pos < 30:
+        abnormal.append({"type": "底部放巨量", "description": "低位出现巨量，可能预示反转", "severity": "positive"})
+    if is_huge and price_pos > 70:
+        price_change = latest.get("price_change", 0) * 100
+        if price_change < 2:
+            abnormal.append({"type": "顶部放量滞涨", "description": f"高位放量但涨幅仅{price_change:.2f}%", "severity": "warning"})
+    if latest.get("vol_match", False) == False and latest.get("vol_ratio", 1) > 1.2:
+        if price_pos > 60 and latest.get("price_change", 0) > 0:
+            abnormal.append({"type": "顶背离", "description": "价涨量缩，上涨动力不足", "severity": "warning"})
+        elif price_pos < 40 and latest.get("price_change", 0) < 0:
+            abnormal.append({"type": "底背离", "description": "价跌量缩，可能企稳", "severity": "positive"})
+
+    # 评分（基于知行信号）
+    score = 0
+    if signal == "STRONG":
+        score += 50
+    elif signal == "WATCH":
+        score += 25
+    else:  # DANGER
+        score += 0
+
+    # 均线辅助评分
+    if latest.get("close", 0) > latest.get("ma20", 0):
+        score += 10
+    if latest.get("close", 0) > latest.get("ma60", 0):
+        score += 10
+
+    if latest.get("vol_match", False):
+        score += 20
+    elif latest.get("vol_ratio", 1) > 1.5:
+        score += 10
+
+    # RSI 辅助评分
+    rsi = latest.get("rsi14", 50)
+    if rsi < 30:
+        score += 10  # 超卖可能反弹
+    elif rsi > 80:
+        score -= 10  # 超买注意风险
+
+    return {
+        "etf_code": etf_code,
+        "etf_name": etf_name,
+        "index_code": index_code,
+        "index_name": index_name,
+        "close": latest.get("close", 0),
+        "zx_short": latest.get("zx_short", 0),
+        "zx_long": latest.get("zx_long", 0),
+        "ma5": latest.get("ma5", 0),
+        "ma10": latest.get("ma10", 0),
+        "ma14": latest.get("ma14", 0),
+        "ma20": latest.get("ma20", 0),
+        "ma28": latest.get("ma28", 0),
+        "ma57": latest.get("ma57", 0),
+        "ma60": latest.get("ma60", 0),
+        "ma114": latest.get("ma114", 0),
+        "kdj_k": latest.get("kdj_k", 0),
+        "kdj_d": latest.get("kdj_d", 0),
+        "kdj_j": latest.get("kdj_j", 0),
+        "macd_diff": latest.get("macd_diff", 0),
+        "macd_dea": latest.get("macd_dea", 0),
+        "macd_hist": latest.get("macd_hist", 0),
+        "rsi14": rsi,
+        "vol_ratio": latest.get("vol_ratio", 1),
+        "vol_match": latest.get("vol_match", False),
+        "price_pos_60d": price_pos,
+        "signal": signal,
+        "position": position,
+        "pattern_score": score,
+        "abnormal_signals": abnormal,
+        # 偏离比例
+        "close_pct_short": close_pct_short,
+        "close_pct_long": close_pct_long,
+        "short_pct_long": short_pct_long,
+        # 偏离变化
+        "close_deviation_change": close_deviation_change,
+        # 三线位置
+        "line_position": line_position,
+        # 均线排列
+        "ma_pattern": ma_pattern,
+    }
 
 
 def get_realtime_price(codes: list) -> dict:

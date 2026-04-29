@@ -23,7 +23,7 @@ stock-signal/
 │   └── report/                # 报告输出
 │       ├── terminal.py       # 终端输出
 │       ├── feishu.py         # 飞书推送
-│       └── portfolio_analyzer.py  # ETF持仓分析
+│       └── portfolio_professional.py  # ETF持仓分析
 │
 ├── dividend_monitor/         # 红利指数监控模块
 │   ├── main.py               # 主入口（红利指数报告）

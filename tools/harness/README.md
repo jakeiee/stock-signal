@@ -18,7 +18,6 @@ tools/harness/
 ├── registry.py               # Step 注册表
 ├── dividend_harness.py       # 股息监控适配层
 ├── market_harness.py         # 市场监控适配层
-├── portfolio_harness.py      # 持仓分析适配层
 ├── selector_harness.py       # 选股适配层
 └── steps/                   # 预定义 Steps
     ├── __init__.py
@@ -274,41 +273,6 @@ harness = create_market_harness(feishu=False, macro=False)
 context = harness.execute()
 ```
 
-## portfolio_harness 示例
-
-```python
-from tools.harness.portfolio_harness import run_portfolio_analysis
-
-# 基本运行
-context = run_portfolio_analysis()
-
-# 发送飞书
-context = run_portfolio_analysis(feishu=True)
-
-# 指定持仓文件
-context = run_portfolio_analysis(positions_file="./my_positions.json")
-
-# 程序化使用
-from tools.harness.portfolio_harness import create_portfolio_harness
-
-harness = create_portfolio_harness(
-    positions_file="./positions.json",
-    output_dir=".",
-    feishu=True
-)
-context = harness.execute()
-```
-
-**执行流程**：
-| Step | 说明 |
-|------|------|
-| `load_positions` | 加载持仓ETF列表 |
-| `analyze_etf` | 分析每只ETF技术指标 |
-| `aggregate_signal` | 聚合持仓信号 |
-| `terminal_output` | 终端输出汇总 |
-| `generate_report` | 生成分析报告 |
-| `feishu_push` | 飞书推送（可选） |
-
 ## selector_harness 示例
 
 ```python
@@ -355,9 +319,6 @@ context = harness.execute()
 ## CLI 使用
 
 ```bash
-# 持仓分析
-python3 tools/harness/portfolio_harness.py --positions ./positions.json --feishu
-
 # 选股
 python3 tools/harness/selector_harness.py --strategy strong --feishu
 
