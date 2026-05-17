@@ -44,27 +44,27 @@ jobs:
       - name: 安装 lark-cli
         run: npm install -g @larksuite/cli
 
-      - name: 配置 lark-cli
+      - name: 执行持仓分析（带重试机制 + 飞书推送）
+        uses: nick-fields/retry@v3
         env:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
-        run: |
-          mkdir -p ~/.lark-cli
-          cat > ~/.lark-cli/config.json << EOF
-          {
-            "appId": "${LARK_APP_ID}",
-            "appSecret": "${LARK_APP_SECRET}",
-            "brand": "feishu"
-          }
-          EOF
-
-      - name: 执行持仓分析（带重试机制 + 飞书推送）
-        uses: nick-fields/retry@v3
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         with:
           timeout_minutes: 10
           max_attempts: 3
           retry_wait_seconds: 60
           command: |
+            # 配置 lark-cli
+            mkdir -p ~/.lark-cli
+            cat > ~/.lark-cli/config.json << EOF
+            {
+              "appId": "${LARK_APP_ID}",
+              "appSecret": "${LARK_APP_SECRET}",
+              "brand": "feishu"
+            }
+            EOF
+            echo "lark-cli 配置完成"
             # 设置 Tushare token（如果提供）
             if [ -n "$TUSHARE_TOKEN" ]; then
               python -c "import tushare as ts; ts.set_token('$TUSHARE_TOKEN')"
