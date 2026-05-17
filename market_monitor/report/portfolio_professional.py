@@ -1132,6 +1132,7 @@ class ProfessionalETFReportGenerator:
             with open(temp_path, 'w', encoding='utf-8') as f:
                 f.write(content)
 
+            print(f"📄 正在创建飞书文档...")
             # 调用 lark-cli 创建文档
             result = subprocess.run(
                 ['lark-cli', 'docs', '+create',
@@ -1142,16 +1143,27 @@ class ProfessionalETFReportGenerator:
                 timeout=60
             )
 
-            if result.returncode == 0:
-                output = json.loads(result.stdout)
-                if output.get('ok'):
-                    data = output.get('data', {})
-                    doc_data = data.get('document', {})
-                    doc_id = doc_data.get('document_id', '')
-                    doc_url = doc_data.get('url', '')
-                    return doc_id, doc_url
+            print(f"   lark-cli returncode: {result.returncode}")
+            print(f"   lark-cli stdout: {result.stdout[:500] if result.stdout else '(empty)'}")
+            print(f"   lark-cli stderr: {result.stderr[:500] if result.stderr else '(empty)'}")
 
-            print(f"⚠ 创建文档失败: {result.stderr}")
+            if result.returncode == 0:
+                try:
+                    output = json.loads(result.stdout)
+                    if output.get('ok'):
+                        data = output.get('data', {})
+                        doc_data = data.get('document', {})
+                        doc_id = doc_data.get('document_id', '')
+                        doc_url = doc_data.get('url', '')
+                        print(f"   文档创建成功: {doc_url}")
+                        return doc_id, doc_url
+                    else:
+                        print(f"   文档创建失败 (ok=false): {output}")
+                except json.JSONDecodeError as e:
+                    print(f"   JSON解析失败: {e}, stdout={result.stdout[:200]}")
+            else:
+                print(f"   lark-cli 执行失败 (returncode={result.returncode})")
+
             return None, None
 
         except Exception as e:
