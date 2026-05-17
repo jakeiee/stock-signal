@@ -1122,56 +1122,127 @@ class ProfessionalETFReportGenerator:
 
         return xml
 
+    def _get_feishu_token(self) -> str:
+        """获取飞书 tenant_access_token"""
+        import requests
+        app_id = os.getenv('LARK_APP_ID', '')
+        app_secret = os.getenv('LARK_APP_SECRET', '')
+        if not app_id or not app_secret:
+            print("   错误: LARK_APP_ID 或 LARK_APP_SECRET 未设置")
+            return None
+        resp = requests.post(
+            'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+            json={'app_id': app_id, 'app_secret': app_secret},
+            timeout=10
+        )
+        data = resp.json()
+        if data.get('code') == 0:
+            return data.get('tenant_access_token')
+        print(f"   获取 token 失败: {data}")
+        return None
+
     def create_doc(self) -> tuple:
-        """创建飞书文档"""
+        """创建飞书文档 - 使用 OpenAPI"""
+        import requests
+
+        print(f"📄 正在创建飞书文档...")
+        token = self._get_feishu_token()
+        if not token:
+            return None, None
+
+        # 1. 创建空文档
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        create_resp = requests.post(
+            'https://open.feishu.cn/open-apis/docx/v1/documents',
+            headers=headers,
+            json={'title': f'ETF持仓分析报告 {self.report_date}'},
+            timeout=10
+        )
+        create_data = create_resp.json()
+        print(f"   创建文档响应: {create_data}")
+
+        if create_data.get('code') != 0:
+            print(f"   创建文档失败: {create_data}")
+            return None, None
+
+        doc_data = create_data.get('data', {}).get('document', {})
+        doc_id = doc_data.get('document_id', '')
+        doc_url = f"https://my.feishu.cn/docx/{doc_id}"
+
+        # 2. 写入内容
         content = self.generate()
+        # 将 XML 转换为纯文本块
+        blocks = self._convert_xml_to_blocks(content)
 
-        # 保存到临时文件
-        temp_path = './etf_report.xml'
-        try:
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+        write_resp = requests.post(
+            f'https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children',
+            headers=headers,
+            json={'children': blocks},
+            timeout=30
+        )
+        write_data = write_resp.json()
+        print(f"   写入内容响应: {write_data}")
 
-            print(f"📄 正在创建飞书文档...")
-            # 调用 lark-cli 创建文档
-            result = subprocess.run(
-                ['lark-cli', 'docs', '+create',
-                 '--api-version', 'v2',
-                 '--content', f'@{temp_path}'],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
+        if write_data.get('code') == 0:
+            print(f"   文档创建成功: {doc_url}")
+            return doc_id, doc_url
+        else:
+            print(f"   写入内容失败: {write_data}")
+            return doc_id, doc_url  # 即使写入失败也返回链接，至少文档已创建
 
-            print(f"   lark-cli returncode: {result.returncode}")
-            print(f"   lark-cli stdout: {result.stdout[:500] if result.stdout else '(empty)'}")
-            print(f"   lark-cli stderr: {result.stderr[:500] if result.stderr else '(empty)'}")
+    def _convert_xml_to_blocks(self, xml_content: str) -> list:
+        """将 XML 内容转换为飞书文档块"""
+        import re
+        blocks = []
+        lines = xml_content.strip().split('\n')
 
-            if result.returncode == 0:
-                try:
-                    output = json.loads(result.stdout)
-                    if output.get('ok'):
-                        data = output.get('data', {})
-                        doc_data = data.get('document', {})
-                        doc_id = doc_data.get('document_id', '')
-                        doc_url = doc_data.get('url', '')
-                        print(f"   文档创建成功: {doc_url}")
-                        return doc_id, doc_url
-                    else:
-                        print(f"   文档创建失败 (ok=false): {output}")
-                except json.JSONDecodeError as e:
-                    print(f"   JSON解析失败: {e}, stdout={result.stdout[:200]}")
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # 标题
+            if line.startswith('<h1>'):
+                text = re.sub(r'<h1>|</h1>', '', line)
+                blocks.append({'block_type': 1, 'heading1': {'elements': [{'text_run': {'content': text}}]}})
+            elif line.startswith('<h2>'):
+                text = re.sub(r'<h2>|</h2>', '', line)
+                blocks.append({'block_type': 2, 'heading2': {'elements': [{'text_run': {'content': text}}]}})
+            elif line.startswith('<h3>'):
+                text = re.sub(r'<h3>|</h3>', '', line)
+                blocks.append({'block_type': 3, 'heading3': {'elements': [{'text_run': {'content': text}}]}})
+            # 表格开始/结束
+            elif line.startswith('<table>'):
+                continue
+            elif line.startswith('</table>'):
+                continue
+            elif line.startswith('<tr>'):
+                continue
+            elif line.startswith('</tr>'):
+                continue
+            elif line.startswith('<th>'):
+                continue
+            elif line.startswith('<td>'):
+                continue
+            # 其他行作为普通文本
+            elif line.startswith('<p>'):
+                text = re.sub(r'<p>|</p>', '', line)
+                text = re.sub(r'<[^>]+>', '', text)  # 去除其他标签
+                if text.strip():
+                    blocks.append({'block_type': 4, 'text': {'elements': [{'text_run': {'content': text}}]}})
+            elif line.startswith('<callout'):
+                # 提取 callout 内容
+                text = re.sub(r'<callout[^>]*>|</callout>', '', line)
+                text = re.sub(r'<[^>]+>', '', text)
+                if text.strip():
+                    blocks.append({'block_type': 4, 'text': {'elements': [{'text_run': {'content': text}}]}})
             else:
-                print(f"   lark-cli 执行失败 (returncode={result.returncode})")
+                # 普通文本，去除所有标签
+                text = re.sub(r'<[^>]+>', '', line)
+                if text.strip():
+                    blocks.append({'block_type': 4, 'text': {'elements': [{'text_run': {'content': text}}]}})
 
-            return None, None
-
-        except Exception as e:
-            print(f"⚠ 创建飞书文档出错: {e}")
-            return None, None
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+        return blocks
 
     def build_feishu_card(self, doc_url: str = None) -> dict:
         """构建飞书卡片消息 - 按知行信号分类"""
