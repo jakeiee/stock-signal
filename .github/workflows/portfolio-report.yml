@@ -50,7 +50,7 @@ jobs:
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
         run: |
           mkdir -p ~/.lark-cli
-          cat > ~/.lark-cli/config.json << 'EOF'
+          cat > ~/.lark-cli/config.json << EOF
           {
             "appId": "${LARK_APP_ID}",
             "appSecret": "${LARK_APP_SECRET}",
