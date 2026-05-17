@@ -1283,7 +1283,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="ETF持仓专业分析报告")
     parser.add_argument("--feishu", "-f", action="store_true", help="发送飞书消息")
-    parser.add_argument("--positions", "-p", default="data/positions.json", help="持仓文件路径")
+    parser.add_argument("--positions", "-p", default="market_monitor/positions.json", help="持仓文件路径")
     parser.add_argument("--pm-style", "-s", 
                         choices=["compact", "market", "action", "all"],
                         default="action",

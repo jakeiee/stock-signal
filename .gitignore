@@ -16,12 +16,13 @@ protected_data_sources/
 ### 个人数据（不提交） ###
 trading_log.json
 trading_log.csv
-positions.json
+data/positions.json
 
 ### 数据缓存（不提交） ###
 *.csv
 *.json
 !requirements.txt
+!market_monitor/positions.json
 
 ### 飞书报告临时文件（不提交） ###
 feishu_doc_*.xml
