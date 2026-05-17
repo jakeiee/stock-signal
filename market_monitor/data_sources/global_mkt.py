@@ -641,10 +641,14 @@ def fetch_asia_market(timeout: int = 15) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 万得全A（除金融石油石化）估值（881003.WI）
+# ⚠️ 已废弃：万得全A PE百分位数据改用 wind_a_ex_fin_oil_pe.csv（手动维护）
+# ⚠️ fetch_wa_valuation() 不再被主流程调用
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_wa_valuation(timeout: int = 15) -> dict:
     """
+    ⚠️ 已废弃，请使用 valuation.py 中的 fetch_market_valuation()
+    
     获取万得全A（除金融石油石化）估值数据。
 
     流程：

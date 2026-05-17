@@ -246,3 +246,83 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 - Tags: automatic, learning, dividend_monitor
 
 ---
+
+## [LRN-20260517-002] best_practice (dividend_monitor)
+
+**Logged**: 2026-05-17T22:34:33.786620
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送成功
+
+### Details
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-05-17 22:34
+
+### Metadata
+- Module: dividend_monitor
+- Source: automatic_tracking
+- Tags: automatic, learning, dividend_monitor
+
+---
+
+## [LRN-20260517-003] best_practice (dividend_monitor)
+
+**Logged**: 2026-05-17T22:40:18.495356
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送成功
+
+### Details
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-05-17 22:39
+
+### Metadata
+- Module: dividend_monitor
+- Source: automatic_tracking
+- Tags: automatic, learning, dividend_monitor
+
+---
+
+## [LRN-20260517-004] best_practice (dividend_monitor)
+
+**Logged**: 2026-05-17T22:56:58.410221
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送成功
+
+### Details
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-05-17 22:56
+
+### Metadata
+- Module: dividend_monitor
+- Source: automatic_tracking
+- Tags: automatic, learning, dividend_monitor
+
+---
+
+## [LRN-20260517-005] best_practice (dividend_monitor)
+
+**Logged**: 2026-05-17T23:03:59.788564
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送成功
+
+### Details
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-05-17 23:03
+
+### Metadata
+- Module: dividend_monitor
+- Source: automatic_tracking
+- Tags: automatic, learning, dividend_monitor
+
+---

@@ -1,5 +1,41 @@
 # 持仓分析 Harness 执行记录
 
+## 2026-04-29 (周三)
+
+### 执行状态
+- **状态**: 成功
+- **总持仓**: 8 只（分析 7 只，跳过 1 只）
+- **强势**: 1 只
+- **观望**: 1 只
+- **危险**: 5 只
+- **超跌**: 0 只
+- **平均评分**: 29/100
+- **分析失败**: 513090 香港证券ETF（无 ETF_MAPPING 映射）
+
+### 强势持仓
+- 科创板长城: 收盘>白线>黄线（三线多头）
+
+### 危险持仓
+- 恒生科技ETF华夏、恒生互联网ETF、软件ETF嘉实、游戏ETF华夏、机器人ETF华夏
+
+### 飞书推送
+- 状态: 成功
+- 报告已发送到飞书
+
+### 步骤执行结果
+1. load_positions: success
+2. analyze_etf: success (7/8)
+3. aggregate_signal: success
+4. terminal_output: success
+5. generate_report: success
+6. feishu_push: success
+
+### 踩坑记录
+- `python3 tools/harness/portfolio_harness.py` 直接运行会报相对导入错误，需使用 `python3 -c "..."` 或模块方式 `python3 -m tools.harness.portfolio_harness`
+- 修复 `NameError: name 'Any' is not defined` - 需在 portfolio_harness.py 中添加 `from typing import List, Any`
+
+---
+
 ## 2026-04-27 (周一)
 
 ### 执行状态

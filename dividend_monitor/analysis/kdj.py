@@ -2,8 +2,8 @@
 KDJ 技术指标计算模块。
 
 数据源策略：
-  优先：妙想API（标注 source='mx'）
-  降级：中证官网 OHLCV 自算（标注 source='csindex'）
+  第一优先：中证官网 OHLCV 自算（标注 source='csindex'，真实指数数据）
+  第二降级：妙想API（标注 source='mx'）
 """
 
 import sys
@@ -208,10 +208,22 @@ def _calc_kdj_from_df(df, n: int = 9) -> Optional[dict]:
 def fetch(idx: dict) -> list:
     """
     获取最新一周周线KDJ。
-    优先：妙想API（标注 source='mx'）
-    降级：中证官网 OHLCV 自算（标注 source='csindex'）
+    第一优先：中证官网 OHLCV 自算（标注 source='csindex'，真实指数数据）
+    第二降级：妙想API（标注 source='mx'）
     """
-    # ── 优先：妙想 API ──
+
+    # ── 第一优先：中证官网 OHLCV 自算 ──
+    csindex_code = idx.get("csindex_code")
+    if csindex_code:
+        try:
+            df = _csindex_ohlcv(csindex_code, days=300)
+            kdj = _calc_kdj_from_df(df)
+            if kdj:
+                return [kdj]
+        except Exception:
+            pass
+
+    # ── 降级：妙想 API ──
     try:
         items = mx_query(f"{idx['query_name']}最近30天周线KDJ指标")
         if items:
@@ -246,18 +258,6 @@ def fetch(idx: dict) -> list:
                     return result
     except RuntimeError:
         pass
-    except Exception:
-        pass
-
-    # ── 降级：中证官网 OHLCV 自算 ──
-    csindex_code = idx.get("csindex_code")
-    if not csindex_code:
-        return []
-    try:
-        df = _csindex_ohlcv(csindex_code, days=300)
-        kdj = _calc_kdj_from_df(df)
-        if kdj:
-            return [kdj]
     except Exception:
         pass
 

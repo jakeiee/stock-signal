@@ -2,7 +2,7 @@
 基本面数据源：全市场 PE/PB/股息率 及其历史百分位。
 
 数据来源：
-  - 万得全A（除金融石油石化）：wind_a_pe_history.csv（Wind API + 手动维护百分位）
+  - 万得全A（除金融石油石化）：market_monitor/data/wind_a_ex_fin_oil_pe.csv（Wind APP 手动记录）
   - 其他指数：Wind APP 手动记录数据（wind_app_recorded_data/*.json）
 
 返回格式统一为 {"data": ..., "error": str|None, "updated_at": str}。
@@ -15,12 +15,13 @@ import csv
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
-# Wind APP数据目录
+# 项目根目录
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Wind APP数据目录
 WIND_APP_DATA_DIR = os.path.join(_PROJECT_ROOT, "wind_app_recorded_data")
 
-# 万得全A历史数据CSV路径
-_WA_CSV_PATH = os.path.join(_PROJECT_ROOT, "data", "wind_a_pe_history.csv")
+# 万得全A（除金融石油石化）PE百分位CSV路径
+_WA_PE_CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "wind_a_ex_fin_oil_pe.csv")
 
 
 def _load_wind_app_data() -> Dict[str, Dict[str, Any]]:
@@ -45,46 +46,40 @@ def _load_wind_app_data() -> Dict[str, Dict[str, Any]]:
     return result
 
 
-def _load_wa_csv() -> tuple:
+def _load_wa_pe_csv() -> tuple:
     """
-    加载万得全A历史数据CSV。
+    加载万得全A（除金融石油石化）PE百分位CSV。
+
+    CSV格式: date,index_code,pe,max分位,source
 
     Returns:
-        (rows: list, latest_pe_pct: float|None, last_updated: str|None)
+        (rows: list, latest_pe: float, latest_pe_pct: float, last_updated: str|None)
         rows: 按日期升序排列的字典列表
-        latest_pe_pct: 最新一行的pe_pct（手动维护）
-        last_updated: 最新一行的last_updated日期（手动维护）
+        latest_pe: 最新一行的PE值
+        latest_pe_pct: 最新一行的PE历史百分位
+        last_updated: 最新一行的日期
     """
-    if not os.path.exists(_WA_CSV_PATH):
-        return [], None, None
+    if not os.path.exists(_WA_PE_CSV_PATH):
+        return [], None, None, None
 
     rows = []
+    latest_pe = None
     latest_pe_pct = None
     latest_updated = None
 
     try:
-        with open(_WA_CSV_PATH, "r", encoding="utf-8") as f:
+        with open(_WA_PE_CSV_PATH, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 rows.append(row)
-                if row.get("pe_pct"):
-                    latest_pe_pct = float(row["pe_pct"])
-                    latest_updated = row.get("last_updated", "")
-    except Exception:
+                if row.get("pe") and row.get("max分位"):
+                    latest_pe = float(row["pe"])
+                    latest_pe_pct = float(row["max分位"])
+                    latest_updated = row.get("date", "")
+    except Exception as e:
         pass
 
-    return rows, latest_pe_pct, latest_updated
-
-
-def _calc_percentile(pe_values: List[float], current_pe: float) -> Optional[float]:
-    """计算PE历史百分位"""
-    if not pe_values or current_pe is None:
-        return None
-    valid_values = [v for v in pe_values if v is not None and v != ""]
-    if not valid_values:
-        return None
-    count = sum(1 for v in valid_values if v <= current_pe)
-    return round(count / len(valid_values) * 100, 1)
+    return rows, latest_pe, latest_pe_pct, latest_updated
 
 
 def _extract_launch_date(historical_period: str) -> str:
@@ -98,92 +93,45 @@ def fetch_market_valuation() -> Dict[str, Any]:
     获取全市场估值数据。
 
     数据来源：
-    - 优先从 wind_a_pe_history.csv 获取（万得全A除金融石油石化）
-    - 如果 CSV 数据不是最新，调用 Wind API 补充新数据
+    - 万得全A（除金融石油石化）：market_monitor/data/wind_a_ex_fin_oil_pe.csv（Wind APP 手动记录）
 
     Returns:
         {
             "data": {
                 "pe": float,           # 市盈率
-                "pb": float,           # 市净率
-                "div_yield": float,    # 股息率
-                "pe_pct": float,       # PE历史百分位（手动维护）
-                "pb_pct": float,       # PB历史百分位
-                "div_pct": float,      # 股息率历史百分位
+                "pb": float,           # 市净率（暂不支持）
+                "div_yield": float,    # 股息率（暂不支持）
+                "pe_pct": float,       # PE历史百分位
+                "pb_pct": float,       # PB历史百分位（暂不支持）
+                "div_pct": float,      # 股息率历史百分位（暂不支持）
                 "date": str,
-                "last_updated": str,   # 百分位最后手动更新日期
+                "last_updated": str,   # 数据日期
             },
             "error": None,
             "updated_at": str,
         }
     """
-    # 加载 CSV 数据
-    rows, csv_pe_pct, last_updated = _load_wa_csv()
+    # 加载 PE 百分位 CSV 数据
+    rows, pe, pe_pct, last_updated = _load_wa_pe_csv()
 
-    if not rows:
-        # CSV 为空，尝试调用 Wind API
-        return _fetch_wa_from_api()
-
-    # 获取最新一条数据
-    latest = rows[-1]
-    current_date = latest["trade_date"]
-
-    # 注意：Wind API indexid 指向了错误的指数（PE=23），暂时禁用自动更新
-    # 如需更新数据，请手动从 Wind APP 获取并添加到 CSV
-    need_update = False  # 禁用自动 API 更新
-
-    # 计算 PB 历史百分位（基于 CSV 数据）
-    pb_values = []
-    for row in rows:
-        try:
-            if row.get("pb"):
-                pb_values.append(float(row["pb"]))
-        except (ValueError, TypeError):
-            pass
-    current_pb = float(latest["pb"]) if latest.get("pb") else None
-    pb_pct = _calc_percentile(pb_values, current_pb) if pb_values else None
-
-    return {
-        "data": {
-            "pe": float(latest["pe"]) if latest.get("pe") else None,
-            "pb": float(latest["pb"]) if latest.get("pb") else None,
-            "div_yield": float(latest["div_yield"]) if latest.get("div_yield") else None,
-            "pe_pct": csv_pe_pct,  # 手动维护
-            "pb_pct": pb_pct,
-            "div_pct": None,
-            "date": current_date,
-            "last_updated": last_updated,
-            "source": "wa_csv",
-            "need_update": need_update,
-        },
-        "error": None,
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    }
-
-
-def _fetch_wa_from_api() -> Dict[str, Any]:
-    """从 Wind API 获取万得全A数据（当 CSV 为空时使用）"""
-    from .global_mkt import fetch_wa_valuation
-
-    result = fetch_wa_valuation()
-    if "error" in result:
+    if not rows or pe is None:
         return {
             "data": None,
-            "error": result["error"],
+            "error": f"无法读取 { _WA_PE_CSV_PATH }",
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
 
     return {
         "data": {
-            "pe": result["pe"],
-            "pb": result["pb"],
-            "div_yield": result["div_yield"],
-            "pe_pct": None,  # CSV 为空，无法获取百分位
+            "pe": pe,
+            "pb": None,  # wind_a_ex_fin_oil_pe.csv 不包含 PB 数据
+            "div_yield": None,  # wind_a_ex_fin_oil_pe.csv 不包含股息率数据
+            "pe_pct": pe_pct,
             "pb_pct": None,
             "div_pct": None,
-            "date": result["date"],
-            "last_updated": None,
-            "source": "wind_api",
+            "date": last_updated,
+            "last_updated": last_updated,
+            "source": "wa_pe_csv",
         },
         "error": None,
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -268,47 +216,30 @@ def _fetch_wa_index_valuation() -> Dict[str, Any]:
     """
     获取万得全A（除金融石油石化）的估值数据。
 
-    从 CSV 读取，百分位手动维护。
+    从 wind_a_ex_fin_oil_pe.csv 读取（Wind APP 手动记录）。
     """
-    # 加载 CSV 数据
-    rows, csv_pe_pct, last_updated = _load_wa_csv()
+    # 加载 PE 百分位 CSV 数据
+    rows, pe, pe_pct, last_updated = _load_wa_pe_csv()
 
-    if not rows:
-        # CSV 为空，尝试调用 Wind API
-        return _fetch_wa_from_api()
-
-    # 获取最新一条数据
-    latest = rows[-1]
-    current_date = latest["trade_date"]
-
-    # 注意：Wind API indexid 指向了错误的指数（PE=23），暂时禁用自动更新
-    # 如需更新数据，请手动从 Wind APP 获取并添加到 CSV
-    need_update = False  # 禁用自动 API 更新
-
-    # 计算 PB 历史百分位（基于 CSV 数据）
-    pb_values = []
-    for row in rows:
-        try:
-            if row.get("pb"):
-                pb_values.append(float(row["pb"]))
-        except (ValueError, TypeError):
-            pass
-    current_pb = float(latest["pb"]) if latest.get("pb") else None
-    pb_pct = _calc_percentile(pb_values, current_pb) if pb_values else None
+    if not rows or pe is None:
+        return {
+            "data": None,
+            "error": f"无法读取 { _WA_PE_CSV_PATH }",
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
 
     return {
         "data": {
-            "pe": float(latest["pe"]) if latest.get("pe") else None,
-            "pb": float(latest["pb"]) if latest.get("pb") else None,
-            "div_yield": float(latest["div_yield"]) if latest.get("div_yield") else None,
-            "pe_pct": csv_pe_pct,  # 手动维护
-            "pb_pct": pb_pct,
+            "pe": pe,
+            "pb": None,
+            "div_yield": None,
+            "pe_pct": pe_pct,
+            "pb_pct": None,
             "div_pct": None,
             "risk_premium": None,
-            "date": current_date,
+            "date": last_updated,
             "last_updated": last_updated,
-            "source": "wa_csv",
-            "need_update": need_update,
+            "source": "wa_pe_csv",
         },
         "error": None,
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),

@@ -35,12 +35,9 @@ def fetch_policy_events() -> Dict[str, Any]:
     # 从 fundamental.py 获取流动性数据（M2/社融/国债）
     try:
         liq_result = fundamental_mod.fetch_macro_liquidity()
-        if "error" in liq_result:
-            error_msg = liq_result.get("error", "流动性数据获取失败")
-            monetary = None
-        else:
+        if liq_result.get("data") is not None:
             # 转换字段名以匹配飞书报告的预期格式
-            liq_data = liq_result
+            liq_data = liq_result.get("data", {})
             monetary = {
                 "date": liq_data.get("period", ""),
                 "period": liq_data.get("period", ""),
@@ -57,6 +54,9 @@ def fetch_policy_events() -> Dict[str, Any]:
                 "source": liq_data.get("source", "东方财富"),
                 "error": None,
             }
+        else:
+            error_msg = liq_result.get("error", "流动性数据获取失败")
+            monetary = None
     except Exception as e:
         error_msg = f"获取货币政策数据异常: {e}"
         monetary = None

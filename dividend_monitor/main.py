@@ -6,9 +6,8 @@
   Step 1  获取估值数据（妙想API → 本地缓存降级）
   Step 2  获取周线KDJ（妙想API → 中证官网自算降级）
   Step 3  获取全市场成交额（中证全指历史），计算动态仓位建议
-  Step 4  计算仓位管理建议（基于 PositionManager）
-  Step 5  终端输出报告
-  Step 6  可选：推送飞书机器人
+  Step 4  终端输出报告
+  Step 5  可选：推送飞书机器人
 
 集成了自我改进学习系统：自动记录执行错误和学习点
 """
@@ -25,9 +24,6 @@ if __package__:
     from .data_sources.csindex import fetch_daily_chg
     from .analysis import valuation, kdj, position
     from .report import terminal, feishu
-    # 仓位管理模块
-    from market_monitor.analysis.position_manager import PositionManager, Market, TrendDirection
-    from market_monitor.data_sources import valuation as market_valuation
 else:
     # 直接执行时 (python dividend_monitor/main.py)
     import sys
@@ -39,10 +35,6 @@ else:
     from dividend_monitor.data_sources.csindex import fetch_daily_chg
     from dividend_monitor.analysis import valuation, kdj, position
     from dividend_monitor.report import terminal, feishu
-    # 仓位管理模块
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from market_monitor.analysis.position_manager import PositionManager, Market, TrendDirection
-    from market_monitor.data_sources import valuation as market_valuation
 
 # 集成自我改进学习系统
 _learning_system_enabled = False
@@ -295,95 +287,20 @@ def main() -> None:
         turnover=turnover,
     )
 
-    # ── Step 4: 仓位管理建议 ──────────────────────────────────────────────────
-    print("→ 计算仓位管理建议...", end=" ", flush=True)
-    pm_result = None
-    try:
-        pm = PositionManager()
-
-        # 构建估值字典 - 与 position_config.json 保持一致
-        valuations = {}
-
-        # A股估值：使用 Wind APP 数据（万得全A除金融石油石化 881003.WI）
-        try:
-            a_result = market_valuation.fetch_index_valuation("881003.WI")
-            if a_result.get("data"):
-                a_pe_pct = a_result["data"].get("pe_pct", 50)
-                valuations[Market.A_STOCK] = 100 - a_pe_pct  # 转换为低估百分位
-                print(f"  A股(万得全A除金融石油石化) PE百分位={a_pe_pct}%, 低估={100-a_pe_pct}%")
-            else:
-                valuations[Market.A_STOCK] = 50.0
-                print(f"  ⚠ A股估值获取失败: {a_result.get('error', '未知错误')}")
-        except Exception as e:
-            print(f"⚠ A股估值获取失败: {e}")
-            valuations[Market.A_STOCK] = 50.0
-
-        # 港股估值：使用 Wind APP 数据（恒生科技 HSTECH）
-        try:
-            hk_result = market_valuation.fetch_index_valuation("HSTECH")
-            if hk_result.get("data"):
-                hk_pe_pct = hk_result["data"].get("pe_pct", 50)
-                valuations[Market.HK_STOCK] = 100 - hk_pe_pct  # 转换为低估百分位
-                print(f"  港股(恒生科技) PE百分位={hk_pe_pct}%, 低估={100-hk_pe_pct}%")
-            else:
-                valuations[Market.HK_STOCK] = 50.0
-                print(f"  ⚠ 港股估值获取失败: {hk_result.get('error', '未知错误')}")
-        except Exception as e:
-            print(f"⚠ 港股估值获取失败: {e}")
-            valuations[Market.HK_STOCK] = 50.0
-
-        # 美股估值：使用 Wind APP 数据（标普500 SPX）
-        try:
-            us_result = market_valuation.fetch_index_valuation("SPX")
-            if us_result.get("data"):
-                us_pe_pct = us_result["data"].get("pe_pct", 50)
-                valuations[Market.US_STOCK] = 100 - us_pe_pct  # 转换为低估百分位
-                print(f"  美股(标普500) PE百分位={us_pe_pct}%, 低估={100-us_pe_pct}%")
-            else:
-                # 回退：使用 Shiller CAPE 数据
-                try:
-                    from market_monitor.data_sources.shiller_api import fetch_us_cape_valuation
-                    cape_result = fetch_us_cape_valuation()
-                    us_pe_pct = cape_result.get("pe_pct", 50)
-                    valuations[Market.US_STOCK] = 100 - us_pe_pct
-                    print(f"  美股(CAPE) PE百分位={us_pe_pct}%, 低估={100-us_pe_pct}%")
-                except Exception:
-                    valuations[Market.US_STOCK] = 50.0
-                    print(f"  ⚠ 美股估值获取失败: {us_result.get('error', '未知错误')}")
-        except Exception as e:
-            print(f"⚠ 美股估值获取失败: {e}")
-            valuations[Market.US_STOCK] = 50.0
-
-        # 获取仓位管理建议
-        pm_result = pm.get_market_allocation(valuations)
-        print(f"✓ 权益仓位 {pm_result.get('total_equity_ratio', 0) * 100:.0f}%")
-
-    except Exception as e:
-        print(f"⚠ 仓位管理计算失败: {e}")
-        if tracker:
-            tracker.log_error(
-                error_summary="仓位管理建议计算失败",
-                error_message=str(e),
-                context="调用 PositionManager.get_market_allocation()",
-                tool_name="PositionManager",
-                priority="medium",
-                fix_suggestion="检查 PositionManager 模块和数据源"
-            )
-
-    # ── Step 5: 终端报告 ──────────────────────────────────────────────────────
+    # ── Step 4: 终端报告 ──────────────────────────────────────────────────────
     terminal.print_report(
         val_results, kdj_data, risk_free_rate, rf_date, now,
         mkt_result=mkt_result, pos_result=pos_result,
     )
 
-    # ── Step 6: 飞书推送 ──────────────────────────────────────────────────────
+    # ── Step 5: 飞书推送 ──────────────────────────────────────────────────────
     if send_to_feishu:
         print("→ 推送飞书...", end=" ", flush=True)
         try:
             card = feishu.build_card(
                 val_results, kdj_data, risk_free_rate, rf_date, now,
-                mkt_result=mkt_result, pos_result=pos_result,
-                pm_result=pm_result,
+                pos_result=pos_result,
+                mkt_result=mkt_result,
             )
             ok = feishu.send(card)
             print("✓ 已发送" if ok else "✗ 发送失败")

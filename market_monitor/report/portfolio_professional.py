@@ -553,10 +553,27 @@ class ProfessionalETFReportGenerator:
             hk_etfs = {"513180", "159202", "159217", "513090"}
             a_etfs = {"159852", "159869", "562500"}
 
-            hk_value = sum(r.get('market_value', 0) for r in self.results if r.get('etf_code') in hk_etfs)
-            a_value = sum(r.get('market_value', 0) for r in self.results if r.get('etf_code') in a_etfs)
-            us_value = 0  # 当前无美股ETF持仓
-            total_value = sum(r.get('market_value', 0) for r in self.results)
+            # 优先使用 market_value 字段，否则用 shares * cost_price 估算
+            # 注意：持仓数据中 code 字段可能在 analyze_etf 后变成 etf_code
+            hk_value = 0
+            a_value = 0
+            us_value = 0
+            for r in self.results:
+                code = r.get('code') or r.get('etf_code', '')
+                if r.get('market_value'):
+                    mv = r['market_value']
+                else:
+                    # 估算市值
+                    shares = r.get('shares', 0)
+                    current_price = r.get('current_price') or r.get('price', 0)
+                    mv = shares * current_price
+                
+                if code in hk_etfs:
+                    hk_value += mv
+                elif code in a_etfs:
+                    a_value += mv
+            
+            total_value = hk_value + a_value + us_value
 
             # 当前各市场实际仓位比例
             current_hk_ratio = hk_value / total_value if total_value else 0
@@ -612,23 +629,26 @@ class ProfessionalETFReportGenerator:
             
             # 添加当前持仓对比信息
             market_alloc = result.get("market_allocations", {})
-            
+
+            # 实际持仓比例映射（基于市场ID）
+            current_weights_map = {
+                Market.A_STOCK.value: current_a_ratio,
+                Market.HK_STOCK.value: current_hk_ratio,
+                Market.US_STOCK.value: current_us_ratio,
+            }
+
             # 计算当前市值对应的目标市值
             for market_id, data in market_alloc.items():
-                if market_id == Market.A_STOCK.value:
-                    data["current_weight"] = current_a_ratio
-                elif market_id == Market.HK_STOCK.value:
-                    data["current_weight"] = current_hk_ratio
-                elif market_id == Market.US_STOCK.value:
-                    data["current_weight"] = current_us_ratio
-                else:
-                    data["current_weight"] = 0
-                    
+                # base_weight 显示实际持仓比例
+                actual_weight = current_weights_map.get(market_id, 0)
+                data["base_weight"] = actual_weight
+                data["current_weight"] = actual_weight
+
                 # 计算调整方向和金额
                 target_w = data.get("target_weight", 0)
                 current_w = data.get("current_weight", 0)
                 data["weight_diff"] = target_w - current_w
-                
+
                 # 调整方向
                 if data["weight_diff"] > 0.02:
                     data["action"] = "增配"
@@ -732,15 +752,17 @@ class ProfessionalETFReportGenerator:
 
 <h2>📊 各市场仓位对比</h2>
 <table>
-  <thead><tr><th>市场</th><th>当前仓位</th><th>建议仓位</th><th>调整方向</th></tr></thead>
+  <thead><tr><th>市场</th><th>当前仓位</th><th>目标仓位</th><th>调整比例</th><th>方向</th></tr></thead>
   <tbody>
 """
             for m in market_details:
                 diff_emoji = "📈" if m['diff'] > 2 else ("📉" if m['diff'] < -2 else "➖")
+                adjust_str = f"+{m['diff']:.1f}%" if m['diff'] > 0 else f"{m['diff']:.1f}%"
                 xml += f"""    <tr>
       <td>{m['name']}</td>
       <td>{m['current_w']:.1f}%</td>
-      <td>{m['target_w']:.1f}%</td>
+      <td><b>{m['target_w']:.1f}%</b></td>
+      <td>{adjust_str}</td>
       <td>{diff_emoji} {m['action']}</td>
     </tr>
 """
@@ -754,7 +776,7 @@ class ProfessionalETFReportGenerator:
 
 <h2>📊 各市场仓位对比</h2>
 <table>
-  <thead><tr><th>市场</th><th>估值</th><th>趋势</th><th>当前仓位</th><th>建议仓位</th><th>差异</th></tr></thead>
+  <thead><tr><th>市场</th><th>估值</th><th>趋势</th><th>当前仓位</th><th>目标仓位</th><th>调整比例</th></tr></thead>
   <tbody>
 """
             for m in market_details:
@@ -768,7 +790,7 @@ class ProfessionalETFReportGenerator:
       <td>{diff_str}</td>
     </tr>
 """
-            xml += """  </tbody>
+            xml += f"""  </tbody>
 </table>
 
 <h2>📌 目标仓位总览</h2>
@@ -778,7 +800,7 @@ class ProfessionalETFReportGenerator:
     <tr><td>权益仓位</td><td>⚖️ {total_equity:.0f}%</td></tr>
     <tr><td>现金/债券</td><td>💵 {cash_ratio:.0f}%</td></tr>
   </tbody>
-</table>""".format(total_equity=total_equity, cash_ratio=cash_ratio)
+</table>"""
             return xml
 
         # ── 样式3: 行动聚焦 ───────────────────────────────────────────────────
@@ -787,7 +809,7 @@ class ProfessionalETFReportGenerator:
 <h1>五、仓位调整建议</h1>
 
 <table>
-  <thead><tr><th>市场</th><th>当前→建议</th><th>调整</th><th>操作</th></tr></thead>
+  <thead><tr><th>市场</th><th>当前仓位</th><th>目标仓位</th><th>调整比例</th><th>操作建议</th></tr></thead>
   <tbody>
 """
             for m in market_details:
@@ -803,10 +825,17 @@ class ProfessionalETFReportGenerator:
                 else:
                     priority = ""
 
+                # 调整比例格式化
+                if m['diff'] > 0:
+                    adjust_ratio_str = f"+{m['diff']:.1f}%"
+                else:
+                    adjust_ratio_str = f"{m['diff']:.1f}%"
+
                 xml += f"""    <tr>
       <td>{m['name']}</td>
-      <td>{m['current_w']:.0f}% → {m['target_w']:.0f}%</td>
-      <td>{m['diff']:+.0f}%</td>
+      <td>{m['current_w']:.1f}%</td>
+      <td><b>{m['target_w']:.1f}%</b></td>
+      <td>{adjust_ratio_str}</td>
       <td>{op} {priority}</td>
     </tr>
 """
@@ -883,18 +912,19 @@ class ProfessionalETFReportGenerator:
             lines.append(f"⚖️ 权益建议 **{total_equity:.0f}%** | 💵 现金 **{cash_ratio:.0f}%**")
             lines.append("")
             lines.append("**📈 各市场调整方向**")
-            lines.append("| 市场 | 当前 | 建议 | 方向 |")
-            lines.append("|:---|:---:|:---:|:---|")
+            lines.append("| 市场 | 当前 | 目标 | 调整比例 | 方向 |")
+            lines.append("|:---|:---:|:---:|:---:|:---|")
             for m in market_details:
                 arrow = "↑" if m['diff'] > 2 else ("↓" if m['diff'] < -2 else "—")
-                lines.append(f"| {m['name']} | {m['current_w']:.0f}% | {m['target_w']:.0f}% | {arrow} {m['action']} |")
+                adjust_str = f"+{m['diff']:.0f}%" if m['diff'] > 0 else f"{m['diff']:.0f}%"
+                lines.append(f"| {m['name']} | {m['current_w']:.0f}% | {m['target_w']:.0f}% | {adjust_str} | {arrow} {m['action']} |")
             return "\n".join(lines)
 
         # ── 样式2: 市场明细对比 ─────────────────────────────────────────────────
         elif style == "market":
             lines = []
             lines.append("**📊 各市场仓位对比**")
-            lines.append("| 市场 | 估值 | 趋势 | 当前 | 建议 | 差异 |")
+            lines.append("| 市场 | 估值 | 趋势 | 当前 | 目标 | 调整比例 |")
             lines.append("|:---|:---:|:---|:---:|:---:|:---:|")
             for m in market_details:
                 diff_str = f"+{m['diff']:.1f}%" if m['diff'] >= 0 else f"{m['diff']:.1f}%"
@@ -911,12 +941,15 @@ class ProfessionalETFReportGenerator:
             for m in market_details:
                 if m['diff'] > 2:
                     op = "📈增配"
+                    adjust_desc = f"建议增配至 **{m['target_w']:.0f}%**（+{m['diff']:.0f}%）"
                 elif m['diff'] < -2:
                     op = "📉减配"
+                    adjust_desc = f"建议减配至 **{m['target_w']:.0f}%**（{m['diff']:.0f}%）"
                 else:
                     op = "➖持稳"
+                    adjust_desc = f"维持当前 **{m['target_w']:.0f}%**"
                 lines.append(
-                    f"• **{m['name']}**: {m['current_w']:.0f}%→{m['target_w']:.0f}% ({m['diff']:+.0f}%) {op}"
+                    f"• **{m['name']}**: {adjust_desc} {op}"
                 )
             lines.append("")
             lines.append(f"⚖️ 目标仓位：权益 **{total_equity:.0f}%** / 现金 **{cash_ratio:.0f}%**")
