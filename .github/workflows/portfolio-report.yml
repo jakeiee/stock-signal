@@ -2,7 +2,7 @@ name: 持仓分析报告
 
 on:
   schedule:
-    - cron: '30 2 * * 1-5'    # 工作日北京时间 10:30 (UTC 02:30)
+    - cron: '30 2 * * 1-5'    # 工作日北京时间 10:30 (UTC 02:30) - 持仓分析
   workflow_dispatch:             # 支持手动触发
 
 jobs:
@@ -71,15 +71,6 @@ jobs:
             fi
             # 执行报告生成（包含飞书文档 + 飞书卡片消息）
             python -m market_monitor.report.portfolio_professional --feishu
-
-      - name: 执行红利指数监控（带重试机制 + 飞书推送）
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          retry_wait_seconds: 60
-          command: |
-            python -m dividend_monitor --feishu
 
       - name: 上传报告
         uses: actions/upload-artifact@v4

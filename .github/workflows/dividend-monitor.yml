@@ -2,7 +2,7 @@ name: 红利指数监控
 
 on:
   schedule:
-    - cron: '30 2 * * 1-5'    # 工作日北京时间 10:30 (UTC 02:30)
+    - cron: '35 2 * * 1-5'    # 工作日北京时间 10:35 (UTC 02:35) - 红利监控
   workflow_dispatch:             # 支持手动触发
 
 jobs:
