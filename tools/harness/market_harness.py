@@ -618,3 +618,80 @@ if __name__ == "__main__":
         new_accounts_override=cfg.get("new_accounts"),
         margin_override=cfg.get("margin_override"),
     )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# BaseModule 实现
+# ═════════════════════════════════════════════════════════════════════
+
+from tools.harness.module_interface import BaseModule, ModuleMetadata
+from typing import List
+
+
+class MarketModule(BaseModule):
+    """市场监控模块 - 实现BaseModule接口"""
+
+    def __init__(self, feishu: bool = False, macro: bool = False):
+        self.feishu = feishu
+        self.macro = macro
+        self.metadata = ModuleMetadata(
+            name="market_monitor",
+            version="1.0.0",
+            description="市场监控：资金面 + 基本面 + 政策面 + 全球市场",
+            author="CodeBuddy",
+            dependencies=["market_monitor"],
+            tags=["finance", "market", "monitoring"]
+        )
+
+    def get_metadata(self) -> ModuleMetadata:
+        """获取模块元数据"""
+        return self.metadata
+
+    def get_steps(self) -> List[Step]:
+        """获取模块步骤列表"""
+        return [
+            FetchCapitalDataStep(
+                StepConfig(metadata={"data_key": "capital_data", "description": "资金面数据"})
+            ),
+            FetchFundamentalDataStep(
+                StepConfig(metadata={"data_key": "fundamental_data", "description": "基本面数据"})
+            ),
+            FetchPolicyDataStep(
+                StepConfig(metadata={"data_key": "policy_data", "description": "政策面数据"})
+            ),
+            FetchGlobalMarketDataStep(
+                StepConfig(metadata={"data_key": "global_data", "description": "全球市场数据"})
+            ),
+            FetchValuationDataStep(
+                StepConfig(metadata={"data_key": "valuation_data", "description": "市场估值数据"})
+            ),
+            AggregateSignalStep(
+                StepConfig(metadata={"output_key": "report_data", "description": "聚合信号生成报告"})
+            ),
+            TerminalOutputStep(
+                StepConfig(metadata={"description": "终端输出"})
+            ),
+        ]
+
+    def validate_config(self) -> bool:
+        """验证模块配置"""
+        return True
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """运行模块"""
+        harness = create_market_harness(feishu=self.feishu, macro=self.macro)
+        return harness.execute()
+
+    def health_check(self) -> bool:
+        """健康检查"""
+        try:
+            from pathlib import Path
+            data_path = Path("/Users/liuyi/WorkBuddy/stock-signal/market_monitor/data")
+            return data_path.exists()
+        except Exception:
+            return False
+
+
+# 自注册
+from tools.harness.module_registry import register_module
+register_module(MarketModule())

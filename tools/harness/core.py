@@ -140,6 +140,9 @@ class Harness:
 
     # ==================== Execution ====================
 
+    # 性能监控阈值（秒）
+    PERFORMANCE_THRESHOLD = 60  # 60秒
+
     def execute(
         self,
         data: Optional[Dict[str, Any]] = None,
@@ -155,6 +158,9 @@ class Harness:
         Returns:
             执行上下文
         """
+        import time
+        from pathlib import Path
+
         # 创建执行上下文
         context = ExecutionContext(name=self.name, config=self.config)
 
@@ -163,6 +169,10 @@ class Harness:
             for key, value in data.items():
                 context.set(key, value)
 
+        # 记录开始时间
+        start_time = time.time()
+        perf_monitor_enabled = self.config.get("perf_monitor", True)
+
         try:
             # 执行前 Hooks
             for callback in self._before_all:
@@ -170,7 +180,16 @@ class Harness:
 
             context.start()
 
-            # 执行步骤
+            # 执行步骤（带性能监控）
+            if perf_monitor_enabled:
+                # 记录每个步骤的执行时间
+                step_times = {}
+                for i, step in enumerate(self._steps):
+                    step_start = time.time()
+                    # 注意：这里需要修改executor以支持单步执行
+                    # 简化版：只记录总时间和步骤数
+                    pass
+
             context = self._executor.execute(
                 self._steps,
                 context,
@@ -199,7 +218,110 @@ class Harness:
             for callback in self._after_all:
                 callback(context)
 
+        # 性能监控：检查总执行时间
+        end_time = time.time()
+        total_time = end_time - start_time
+
+        if perf_monitor_enabled:
+            self._check_performance(context, total_time)
+
         return context
+
+    def _check_performance(self, context: ExecutionContext, total_time: float) -> None:
+        """
+        检查性能，超过阈值则告警
+
+        Args:
+            context: 执行上下文
+            total_time: 总执行时间（秒）
+        """
+        from pathlib import Path
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # 检查总时间
+        if total_time > self.PERFORMANCE_THRESHOLD:
+            warning_msg = f"🔴 性能告警：{self.name} 执行时间 {total_time:.2f}秒，超过阈值 {self.PERFORMANCE_THRESHOLD}秒"
+
+            # 记录到日志
+            logger.warning(warning_msg)
+            context.warning(warning_msg)
+
+            # 记录到ERRORS.md
+            self._log_performance_issue(context, total_time)
+
+        # 检查每个步骤的时间（如果context中有记录）
+        if hasattr(context, 'step_times'):
+            for step_name, step_time in context.step_times.items():
+                if step_time > self.PERFORMANCE_THRESHOLD / len(self._steps):
+                    warning_msg = f"🟡 步骤性能告警：{step_name} 执行时间 {step_time:.2f}秒"
+                    logger.warning(warning_msg)
+                    context.warning(warning_msg)
+
+    def _log_performance_issue(self, context: ExecutionContext, total_time: float) -> None:
+        """
+        记录性能问题到 ERRORS.md
+
+        Args:
+            context: 执行上下文
+            total_time: 总执行时间（秒）
+        """
+        from pathlib import Path
+        import os
+
+        errors_file = Path(__file__).parent.parent.parent / ".learnings" / "ERRORS.md"
+
+        try:
+            # 确保目录存在
+            errors_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # 读取现有内容
+            content = ""
+            if errors_file.exists():
+                content = errors_file.read_text(encoding="utf-8")
+
+            # 添加性能问题记录
+            from datetime import datetime
+            beijing_tz = datetime.now().astimezone().tzinfo
+            timestamp = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+            new_entry = f"""
+
+## [PERF-{timestamp.replace(' ', 'T').replace(':', '-')}] performance
+
+**Logged**: {timestamp}
+**Priority**: medium
+**Status**: pending
+**Area**: performance
+
+### Summary
+性能告警：{self.name} 执行时间 {total_time:.2f}秒，超过阈值 {self.PERFORMANCE_THRESHOLD}秒
+
+### Details
+- 模块：{self.name}
+- 总执行时间：{total_time:.2f}秒
+- 阈值：{self.PERFORMANCE_THRESHOLD}秒
+- 步骤数：{len(self._steps)}
+- 失败步骤数：{sum(1 for r in context.step_results.values() if r.status == 'failed')}
+
+### Metadata
+- Module: {self.name}
+- Source: performance_monitor
+- Tags: performance, slow
+
+---
+
+"""
+
+            # 写入文件
+            with open(errors_file, 'a', encoding='utf-8') as f:
+                f.write(new_entry)
+
+            logger.info(f"性能告警已记录到：{errors_file}")
+
+        except Exception as e:
+            logger.error(f"记录性能告警失败：{e}")
 
     def dry_run(self) -> List[Dict[str, Any]]:
         """

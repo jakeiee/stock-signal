@@ -96,7 +96,8 @@ _SECID = {
 }
 
 # ── Wind 估值接口 URL ──────────────────────────────────────────────────────────
-_WIND_VAL_URL = "https://indexapi.wind.com.cn/indicesWebsite/api/indexValuation"
+# 万得全A（除金融石油石化）881003.WI
+_WIND_VAL_URL = "https://index_api.wind.com.cn/indexofficialwebsite/indexValuation"
 _WIND_VAL_HEADERS = {
     "accept": "application/json",
     "accept-language": "zh-CN,zh;q=0.9",
@@ -113,6 +114,10 @@ _WIND_VAL_HEADERS = {
 _WIND_INDEX_IDS = {
     "MAGS":   "705e7aea0338979a",   # 万得美国科技七巨头 MAGS.WI（发布日期 2024-10-14，仅供参考）
     "TECHK":  "f4e72fbcc5f973d2",   # 万得港股中国科技龙头 TECHK.WI
+    # 万得全A（除金融石油石化）
+    # 代码：881003.WI，indexid：QNhAnjFWhloETMqHcp1KMQ==
+    # API接口：https://index_api.wind.com.cn/indexofficialwebsite/indexValuation
+    "WA_EX_FIN_OIL": "QNhAnjFWhloETMqHcp1KMQ==",
 }
 
 # ── Wind 估值历史 CSV 路径 ────────────────────────────────────────────────────
@@ -174,6 +179,87 @@ def _fetch_kline(
         return result[-n:] if len(result) >= n else result
     except Exception:
         return []
+
+def _eastmoney_secid_to_westlock(secid: str) -> Optional[str]:
+    """
+    将 Eastmoney secid 转换为 westock-data 代码。
+    例：100.HSI → hkHSI，100.N225 → jpN225
+    """
+    if not secid or "." not in secid:
+        return None
+    market_code, symbol = secid.split(".", 1)
+    market_map = {
+        "100": "hk",    # 港股
+        "101": "jp",    # 日本
+        "102": "kr",    # 韩国（可能不支持）
+        "103": "us",    # 美股
+    }
+    market = market_map.get(market_code)
+    if market:
+        return f"{market}{symbol}"
+    return None
+
+
+def _fetch_kline_westlock(code: str, n: int = 15, timeout: int = 15) -> list:
+    """
+    通过 westock-data-skill-hub CLI 获取最近 n 根日 K 线。
+    Fallback 方案，用于 Eastmoney API 无数据的情况。
+
+    Returns:
+        列表，每项为 (date_str, close_price: float)，按日期升序。
+        失败返回空列表。
+    """
+    import subprocess, os
+    # 尝试定位 npx
+    npx_path = os.popen("which npx 2>/dev/null || echo /usr/bin/npx").read().strip()
+    if not npx_path or not os.path.exists(npx_path):
+        npx_path = "/Users/liuyi/.nvm/versions/node/v24.14.0/bin/npx"
+    try:
+        cmd = [npx_path, "--yes", "westock-data-skillhub@latest", "kline", code, "day", str(n)]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            return []
+        lines = result.stdout.strip().split("\n")
+        data = []
+        # 跳过表头和分隔线（前2行）
+        for line in lines[2:]:
+            if not line.strip() or not line.startswith("|"):
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            # 格式：| date | open | last | high | low | volume | amount | exchange |
+            if len(parts) >= 4:
+                date_str = parts[1].strip()
+                try:
+                    close = float(parts[3].strip())
+                    data.append((date_str, close))
+                except (ValueError, IndexError):
+                    pass
+        # westock-data 返回降序（最新在前），需反转为升序（最老在前）
+        # 与 _fetch_kline() 行为保持一致
+        data.reverse()
+        return data[-n:] if len(data) >= n else data
+    except Exception:
+        return []
+
+
+def _fetch_kline_with_fallback(secid: str, n: int = 15, timeout: int = 8) -> list:
+    """
+    获取 K 线数据，优先使用 Eastmoney API，失败时 fallback 到 westock-data-skill-hub。
+    """
+    # 优先尝试 Eastmoney API
+    klines = _fetch_kline(secid, n=n, timeout=timeout)
+    if klines:
+        return klines
+    # Fallback 到 westock-data
+    wd_code = _eastmoney_secid_to_westlock(secid)
+    if wd_code:
+        return _fetch_kline_westlock(wd_code, n=n, timeout=timeout)
+    return []
 
 
 def _safe_float(v) -> Optional[float]:
@@ -531,12 +617,12 @@ def fetch_asia_market(timeout: int = 15) -> dict:
         }
         失败时：{"error": str}
     """
-    result: dict = {"date": None, "source": "eastmoney"}
+    result: dict = {"date": None, "source": "eastmoney+westock"}
     any_ok = False
 
     for sym in ("HSI", "HSTECH", "N225", "KOSPI", "KOSDAQ"):
         secid, _ = _SECID[sym]
-        klines = _fetch_kline(secid, n=15, timeout=timeout)
+        klines = _fetch_kline_with_fallback(secid, n=15, timeout=timeout)
         if klines:
             any_ok = True
             price  = _latest_close(klines)
@@ -551,3 +637,144 @@ def fetch_asia_market(timeout: int = 15) -> dict:
     if not any_ok:
         return {"error": "亚太市场行情接口全部失败（HSI/HSTECH/N225/KOSPI/KOSDAQ）"}
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 万得全A（除金融石油石化）估值（881003.WI）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_wa_valuation(timeout: int = 15) -> dict:
+    """
+    获取万得全A（除金融石油石化）估值数据。
+
+    流程：
+    1. 调用 Wind API 获取最新估值数据
+    2. 追加到 wind_a_pe_history.csv（仅追加新日期）
+    3. 返回最新估值数据（不含百分位，百分位需手动维护）
+
+    Returns:
+        {
+            "date":        str,      # 交易日期
+            "pe":          float,   # 市盈率
+            "pb":          float,   # 市净率
+            "div_yield":   float,   # 股息率
+            "close":       float,   # 收盘点位
+            "source":      str,     # 数据来源
+            "is_new":      bool,    # 是否为新数据（追加到CSV）
+        }
+        失败时：{"error": str}
+    """
+    try:
+        indexid = _WIND_INDEX_IDS["WA_EX_FIN_OIL"]
+        result_list = _fetch_wind_valuation_raw(indexid, timeout=timeout)
+
+        print(f"[接口URL] {_WIND_VAL_URL}?indexid={indexid}&limit=false&lan=cn")
+        print(f"[原始数据] 条数={len(result_list)}, 最新={json.dumps(result_list[-1], ensure_ascii=False)}")
+
+        # 获取最新数据
+        latest = result_list[-1]
+        dt = datetime.fromtimestamp(latest["tradeDate"] / 1000).strftime("%Y-%m-%d")
+        pe = latest.get("peValue")
+        pb = latest.get("pbValue")
+        div_yield = latest.get("didValue")  # Wind API 的股息率字段（股息率 = didValue）
+        close = latest.get("close")
+
+        print(f"[获取数据] 万得全A date={dt}, PE={pe}, PB={pb}, 股息率={div_yield}, close={close}")
+
+        # 检查是否需要追加到 CSV
+        is_new = _append_wa_to_csv(result_list)
+
+        return {
+            "date":      dt,
+            "pe":        round(pe, 2) if pe else None,
+            "pb":        round(pb, 2) if pb else None,
+            "div_yield": round(div_yield, 4) if div_yield else None,
+            "close":     round(close, 4) if close else None,
+            "source":    "wind",
+            "is_new":    is_new,
+        }
+
+    except Exception as e:
+        return {"error": f"万得全A估值获取失败：{e}"}
+
+
+def _append_wa_to_csv(result_list: list) -> bool:
+    """
+    将 Wind API 返回的数据追加到 wind_a_pe_history.csv。
+
+    仅追加 CSV 中不存在的日期数据，保留现有的 pe_pct 和 last_updated 字段。
+    对于旧格式的数据（缺少 pe_pct 和 last_updated 列），自动补空值。
+
+    Returns:
+        True  - 有新数据追加
+        False - 无新数据或追加失败
+    """
+    import csv
+    csv_path = _WIND_CSV["WA"]
+    fieldnames = ["trade_date", "pe", "pb", "div_yield", "close", "pe_pct", "last_updated"]
+
+    # 读取现有数据，构建日期集合
+    existing_dates = set()
+    existing_rows = []  # 保留现有行（含 pe_pct 和 last_updated）
+
+    if os.path.exists(csv_path):
+        try:
+            with open(csv_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    existing_dates.add(row["trade_date"])
+                    # 确保所有字段都存在
+                    for field in fieldnames:
+                        row.setdefault(field, "")
+                    existing_rows.append(row)
+        except Exception as e:
+            print(f"[警告] 读取 CSV 失败: {e}")
+            existing_rows = []
+
+    # 构建 API 数据的日期集合
+    api_dates = set()
+    api_data_map = {}
+    for item in result_list:
+        if "tradeDate" not in item:
+            continue
+        dt = datetime.fromtimestamp(item["tradeDate"] / 1000).strftime("%Y-%m-%d")
+        pe = item.get("peValue", "")
+        pb = item.get("pbValue", "")
+        div = item.get("didValue", "")  # Wind API 的股息率字段
+        close = item.get("close", "")
+        api_dates.add(dt)
+        api_data_map[dt] = {"pe": pe, "pb": pb, "div_yield": div, "close": close}
+
+    # 找出需要新增的日期
+    new_dates = api_dates - existing_dates
+    if not new_dates:
+        print(f"[CSV] 无新数据需追加（最新: {max(api_dates) if api_dates else 'N/A'}）")
+        return False
+
+    # 生成新行
+    new_rows = []
+    for dt in sorted(new_dates):
+        data = api_data_map[dt]
+        new_rows.append({
+            "trade_date":  dt,
+            "pe":         data["pe"],
+            "pb":         data["pb"],
+            "div_yield":  data["div_yield"],
+            "close":      data["close"],
+            "pe_pct":     "",  # 新数据需手动维护
+            "last_updated": "",  # 新数据需手动维护
+        })
+
+    # 写入 CSV（保留现有数据 + 新增数据）
+    try:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(existing_rows)
+            writer.writerows(new_rows)
+
+        print(f"[CSV] 已追加 {len(new_rows)} 条新数据到 {csv_path}（日期: {min(new_dates)} ~ {max(new_dates)}）")
+        return True
+    except Exception as e:
+        print(f"[错误] 写入 CSV 失败: {e}")
+        return False

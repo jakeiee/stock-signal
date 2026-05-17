@@ -185,11 +185,11 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 - Source: automatic_tracking
 - Tags: automatic, learning, dividend_monitor
 
----
 
-## [LRN-20260411-001] best_practice (dividend_monitor)
 
-**Logged**: 2026-04-11T00:05:15.965129
+## [LRN-20260501-001] best_practice (dividend_monitor)
+
+**Logged**: 2026-05-01T10:45:46.821812
 **Priority**: low
 **Status**: pending
 **Area**: finance_analysis
@@ -198,7 +198,7 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 股息指数报告飞书推送成功
 
 ### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-11 00:05
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-05-01 10:45
 
 ### Metadata
 - Module: dividend_monitor
@@ -207,9 +207,9 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 
 ---
 
-## [LRN-20260412-001] best_practice (dividend_monitor)
+## [LRN-20260516-001] best_practice (dividend_monitor)
 
-**Logged**: 2026-04-12T16:05:28.670395
+**Logged**: 2026-05-16T15:03:50.722418
 **Priority**: low
 **Status**: pending
 **Area**: finance_analysis
@@ -218,7 +218,7 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 股息指数报告飞书推送成功
 
 ### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-12 16:05
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-05-16 15:03
 
 ### Metadata
 - Module: dividend_monitor
@@ -227,9 +227,9 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 
 ---
 
-## [LRN-20260412-002] best_practice (dividend_monitor)
+## [LRN-20260517-001] best_practice (dividend_monitor)
 
-**Logged**: 2026-04-12T16:10:36.314003
+**Logged**: 2026-05-17T21:18:59.866548
 **Priority**: low
 **Status**: pending
 **Area**: finance_analysis
@@ -238,127 +238,7 @@ OUTPUT_DIR = os.path.expanduser('~/.openclaw/workspace/mx_data/output')
 股息指数报告飞书推送成功
 
 ### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-12 16:10
-
-### Metadata
-- Module: dividend_monitor
-- Source: automatic_tracking
-- Tags: automatic, learning, dividend_monitor
-
----
-
-## [LRN-20260412-003] best_practice (dividend_monitor)
-
-**Logged**: 2026-04-12T16:34:10.859603
-**Priority**: low
-**Status**: pending
-**Area**: finance_analysis
-
-### Summary
-股息指数报告飞书推送成功
-
-### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-12 16:33
-
-### Metadata
-- Module: dividend_monitor
-- Source: automatic_tracking
-- Tags: automatic, learning, dividend_monitor
-
----
-
-## [LRN-20260414-001] best_practice (dividend_monitor)
-
-**Logged**: 2026-04-14T21:45:12.114774
-**Priority**: low
-**Status**: pending
-**Area**: finance_analysis
-
-### Summary
-股息指数报告飞书推送成功
-
-### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-14 21:44
-
-### Metadata
-- Module: dividend_monitor
-- Source: automatic_tracking
-- Tags: automatic, learning, dividend_monitor
-
----
-
-## [LRN-20260414-002] best_practice (dividend_monitor)
-
-**Logged**: 2026-04-14T21:45:14.980284
-**Priority**: low
-**Status**: pending
-**Area**: finance_analysis
-
-### Summary
-股息指数报告飞书推送成功
-
-### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-14 21:45
-
-### Metadata
-- Module: dividend_monitor
-- Source: automatic_tracking
-- Tags: automatic, learning, dividend_monitor
-
----
-
-## [LRN-20260414-003] best_practice (dividend_monitor)
-
-**Logged**: 2026-04-14T21:49:13.781698
-**Priority**: low
-**Status**: pending
-**Area**: finance_analysis
-
-### Summary
-股息指数报告飞书推送成功
-
-### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-14 21:48
-
-### Metadata
-- Module: dividend_monitor
-- Source: automatic_tracking
-- Tags: automatic, learning, dividend_monitor
-
----
-
-## [LRN-20260414-004] best_practice (dividend_monitor)
-
-**Logged**: 2026-04-14T21:49:32.518834
-**Priority**: low
-**Status**: pending
-**Area**: finance_analysis
-
-### Summary
-股息指数报告飞书推送成功
-
-### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-14 21:49
-
-### Metadata
-- Module: dividend_monitor
-- Source: automatic_tracking
-- Tags: automatic, learning, dividend_monitor
-
----
-
-## [LRN-20260427-001] best_practice (dividend_monitor)
-
-**Logged**: 2026-04-27T00:02:17.671135
-**Priority**: low
-**Status**: pending
-**Area**: finance_analysis
-
-### Summary
-股息指数报告飞书推送成功
-
-### Details
-股息指数报告已成功推送到飞书机器人，推送时间: 2026-04-27 00:02
+股息指数报告已成功推送到飞书机器人，推送时间: 2026-05-17 21:18
 
 ### Metadata
 - Module: dividend_monitor

@@ -159,21 +159,44 @@ _STATS_BASE_URL = "https://data.stats.gov.cn/easyquery.htm"
 _STATS_HEADERS = {
     "Accept":          "application/json, text/javascript, */*; q=0.01",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-    "Referer":         "https://data.stats.gov.cn/",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer":         "https://data.stats.gov.cn/easyquery.htm?cn=C01",
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
     "X-Requested-With": "XMLHttpRequest",
+    "Origin":          "https://data.stats.gov.cn",
+    "Connection":      "keep-alive",
+    "Sec-Fetch-Site":  "same-origin",
+    "Sec-Fetch-Mode":  "cors",
+    "Sec-Fetch-Dest":  "empty",
 }
 
 
+def _get_stats_session():
+    """创建并保持 stats.gov.cn 会话（先访问主页获取 cookie）。"""
+    import requests
+    session = requests.Session()
+    session.headers.update(_STATS_HEADERS)
+    # 先访问主页，获取 cookie
+    try:
+        session.get("https://data.stats.gov.cn/", timeout=10, verify=False)
+    except Exception:
+        pass
+    return session
+
+_stats_session_cache = None
+
 def _stats_fetch_json(url: str, timeout: int = 15) -> dict:
-    """从国家统计局API获取JSON数据。"""
-    req = urllib.request.Request(url, headers=_STATS_HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    """从国家统计局 API 获取 JSON 数据（使用 requests + Session）。"""
+    global _stats_session_cache
+    if _stats_session_cache is None:
+        _stats_session_cache = _get_stats_session()
+    resp = _stats_session_cache.get(url, timeout=timeout, verify=False)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _ensure_data_dir() -> None:
@@ -232,7 +255,7 @@ def _read_gdp_csv() -> dict:
                 "p3_pct_yoy_delta": _safe_float(row.get("p3_pct_yoy_delta")),
                 "source":           row.get("source", ""),
             }
-    return result
+    return {"data": result, "error": None}
 
 
 def _write_gdp_csv(records: dict) -> None:
@@ -276,7 +299,7 @@ def _read_sd_csv() -> dict:
                 "pmi_svc":        _safe_float(row.get("pmi_svc")),
                 "source":         row.get("source", ""),
             }
-    return result
+    return {"data": result, "error": None}
 
 
 def _write_sd_csv(records: dict) -> None:
@@ -432,7 +455,7 @@ def fetch_gdp(timeout: int = 20) -> dict:
         except Exception:
             pass  # 缓存写入失败不影响主流程
 
-        return result
+        return {"data": result, "error": None}
 
     except Exception as e:
         # 降级：读取 CSV 缓存最新一条
@@ -442,10 +465,10 @@ def fetch_gdp(timeout: int = 20) -> dict:
                 latest_period = sorted(cached.keys())[-1]
                 rec = cached[latest_period].copy()
                 rec["source"] = "csv_cache"
-                return rec
+                return {"data": rec, "error": None}
         except Exception:
             pass
-        return {"error": f"GDP 接口获取失败：{e}"}
+        return {"data": None, "error": f"GDP 接口获取失败：{e}"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -552,7 +575,7 @@ def fetch_disposable_income(timeout: int = 20) -> dict:
         except Exception:
             pass
 
-        return result
+        return {"data": result, "error": None}
 
     except Exception as e:
         # 降级：读取 CSV 缓存最新一条
@@ -562,10 +585,10 @@ def fetch_disposable_income(timeout: int = 20) -> dict:
                 latest_period = sorted(cached.keys())[-1]
                 rec = cached[latest_period].copy()
                 rec["source"] = "csv_cache"
-                return rec
+                return {"data": rec, "error": None}
         except Exception:
             pass
-        return {"error": f"居民人均收入接口获取失败：{e}"}
+        return {"data": None, "error": f"居民人均收入接口获取失败：{e}"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -676,7 +699,7 @@ def fetch_social_finance(timeout: int = 20) -> dict:
         except Exception:
             pass
         
-        return result
+        return {"data": result, "error": None}
         
     except Exception as e:
         # 降级：读取 CSV 缓存
@@ -687,10 +710,10 @@ def fetch_social_finance(timeout: int = 20) -> dict:
                 rec = cached[latest_period].copy()
                 rec["source"] = "csv_cache"
                 print(f"[降级] 使用CSV缓存: {rec}")
-                return rec
+                return {"data": rec, "error": None}
         except Exception:
             pass
-        return {"error": f"社融数据获取失败：{e}"}
+        return {"data": None, "error": f"社融数据获取失败：{e}"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -843,7 +866,7 @@ def fetch_macro_supply_demand(timeout: int = 20) -> dict:
                 latest_period = sorted(cached.keys())[-1]
                 rec = cached[latest_period].copy()
                 rec["source"] = "csv_cache"
-                return rec
+                return {"data": rec, "error": None}
         except Exception:
             pass
         errs = "; ".join(
@@ -851,7 +874,7 @@ def fetch_macro_supply_demand(timeout: int = 20) -> dict:
                 cpi_data.get("_err"), ppi_data.get("_err"), pmi_data.get("_err")
             ] if v
         )
-        return {"error": f"宏观供需关系全部接口失败：{errs}"}
+        return {"data": None, "error": f"宏观供需关系全部接口失败：{errs}"}
 
     # ── 以 CPI 期为基准 period，PMI/PPI 有独立 period，统一取最新月 ─────
     candidate_periods = [
@@ -895,7 +918,7 @@ def fetch_macro_supply_demand(timeout: int = 20) -> dict:
     except Exception:
         pass  # 缓存写入失败不影响主流程
 
-    return result
+    return {"data": result, "error": None}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1245,9 +1268,11 @@ def fetch_macro_liquidity(timeout: int = 20) -> dict:
 
     # ── 社融存量同比（使用国家统计局接口）────────────────────────────────
     try:
-        sf_data = fetch_social_finance(timeout=timeout)
-        if "error" in sf_data:
-            sf_data = {"_err": sf_data.get("error", "社融接口失败")}
+        sf_result = fetch_social_finance(timeout=timeout)
+        if sf_result.get("error"):
+            sf_data = {"_err": sf_result["error"]}
+        else:
+            sf_data = sf_result.get("data") or {}
     except Exception as e:
         sf_data = {"_err": f"社融接口失败：{e}"}
 
@@ -1263,13 +1288,13 @@ def fetch_macro_liquidity(timeout: int = 20) -> dict:
                 latest_period = sorted(cached.keys())[-1]
                 rec = cached[latest_period].copy()
                 rec["source"] = "csv_cache"
-                return rec
+                return {"data": rec, "error": None}
         except Exception:
             pass
         errs = "; ".join(
             v for v in [m2_data.get("_err"), bond_data.get("_err"), sf_data.get("_err")] if v
         )
-        return {"error": f"宏观流动性全部接口失败：{errs}"}
+        return {"data": None, "error": f"宏观流动性全部接口失败：{errs}"}
 
     # ── 合并结果 ─────────────────────────────────────────────────────────
     period = m2_data.get("period") or bond_data.get("period") or sf_data.get("period") or "unknown"
@@ -1293,4 +1318,4 @@ def fetch_macro_liquidity(timeout: int = 20) -> dict:
     except Exception:
         pass
 
-    return result
+    return {"data": result, "error": None}

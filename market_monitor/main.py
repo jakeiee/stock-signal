@@ -154,16 +154,17 @@ def main() -> None:
         print("        指南针活跃市值 ⬇ 读取本地数据...", end=" ", flush=True)
         znz_result = capital.fetch_znz_active_cap()
 
-    if "error" not in znz_result:
-        znz_date = znz_result["date"]
-        znz_cap = znz_result["active_cap"]
-        znz_chg = znz_result.get("chg_pct")
-        znz_signal = znz_result.get("signal_desc", "")
-        znz_pos = znz_result.get("position_suggest", "")
+    if znz_result.get("error") is None and znz_result.get("data"):
+        znz_data = znz_result["data"]
+        znz_date = znz_data.get("date", "N/A")
+        znz_cap = znz_data.get("active_cap", 0)
+        znz_chg = znz_data.get("chg_pct")
+        znz_zone = znz_data.get("zone_desc", znz_data.get("position_suggest", ""))
         chg_str = f" {znz_chg:+.2f}%" if znz_chg is not None else ""
-        print(f"✓  [{znz_date}] {znz_cap:,.1f}亿{chg_str} → {znz_signal} 建议仓位{znz_pos}")
+        print(f"✓  [{znz_date}] {znz_cap:,.1f}亿{chg_str} → {znz_zone}")
     else:
-        print(f"○ {znz_result['error']}")
+        error_msg = znz_result.get("error", "未知错误")
+        print(f"○ {error_msg}")
 
     # ② 新开户数：优先命令行覆盖，否则上交所接口自动拉取（本地 CSV 缓存兜底）
     na_override = cfg["new_accounts"]
@@ -228,43 +229,46 @@ def main() -> None:
     # ① 经济总量/结构：GDP
     print("        GDP增速/结构  ⬇ 自动获取（东方财富）...", end=" ", flush=True)
     gdp_result = fundamental_mod.fetch_gdp()
-    if "error" not in gdp_result:
-        period  = gdp_result.get("period", "?")
-        yoy     = gdp_result.get("gdp_yoy")
-        p3_pct  = gdp_result.get("p3_pct")
-        p3_delta = gdp_result.get("p3_pct_yoy_delta")
+    if gdp_result.get("data") is not None:
+        gdp_data = gdp_result.get("data", {})
+        period  = gdp_data.get("period", "?")
+        yoy     = gdp_data.get("gdp_yoy")
+        p3_pct  = gdp_data.get("p3_pct")
+        p3_delta = gdp_data.get("p3_pct_yoy_delta")
         yoy_str  = f"同比 {yoy:.1f}%" if yoy is not None else "?"
         p3_str   = f"  三产占比 {p3_pct:.1f}%" if p3_pct is not None else ""
         delta_str = f"（较去年同期 {p3_delta:+.2f}pp）" if p3_delta is not None else ""
         print(f"✓  [{period}] {yoy_str}{p3_str}{delta_str}")
     else:
-        print(f"✗  {gdp_result['error']}")
+        print(f"✗  {gdp_result.get('error', '获取失败')}")
 
     # ② 人均可支配收入
     print("        人均收入增速  ⬇ 自动获取（国家统计局）...", end=" ", flush=True)
     di_result = fundamental_mod.fetch_disposable_income()
-    if "error" not in di_result:
-        period_di = di_result.get("period", "?")
-        di_yoy = di_result.get("income_yoy")
-        di_src = di_result.get("source", "")
+    if di_result.get("data") is not None:
+        di_data = di_result.get("data", {})
+        period_di = di_data.get("period", "?")
+        di_yoy = di_data.get("income_yoy")
+        di_src = di_data.get("source", "")
         src_label_di = "本地缓存" if di_src == "csv_cache" else "国家统计局"
         if di_yoy is not None:
             print(f"✓  [{period_di}] 人均收入同比 {di_yoy:+.1f}%  来源：{src_label_di}")
         else:
             print(f"✗  人均收入数据缺失")
     else:
-        print(f"✗  {di_result['error']}")
+        print(f"✗  {di_result.get('error', '获取失败')}")
 
     # ③ 宏观供需关系：CPI / PPI / PMI
     print("        宏观供需关系  ⬇ 自动获取（东方财富 CPI/PPI/PMI）...", end=" ", flush=True)
     sd_result = fundamental_mod.fetch_macro_supply_demand()
-    if "error" not in sd_result:
-        sd_period = sd_result.get("period", "?")
-        cpi_v = sd_result.get("cpi_yoy")
-        ppi_v = sd_result.get("ppi_yoy")
-        spr_v = sd_result.get("ppi_cpi_spread")
-        pmi_v = sd_result.get("pmi_mfg")
-        src_sd = sd_result.get("source", "")
+    if sd_result.get("data") is not None:
+        sd_data = sd_result.get("data", {})
+        sd_period = sd_data.get("period", "?")
+        cpi_v = sd_data.get("cpi_yoy")
+        ppi_v = sd_data.get("ppi_yoy")
+        spr_v = sd_data.get("ppi_cpi_spread")
+        pmi_v = sd_data.get("pmi_mfg")
+        src_sd = sd_data.get("source", "")
         src_label_sd = "本地缓存" if src_sd == "csv_cache" else "东方财富实时"
         parts_sd = []
         if cpi_v is not None:
@@ -277,26 +281,27 @@ def main() -> None:
             parts_sd.append(f"制造业PMI {pmi_v:.1f}")
         print(f"✓  [{sd_period}] {'  '.join(parts_sd)}  来源：{src_label_sd}")
     else:
-        print(f"✗  {sd_result['error']}")
+        print(f"✗  {sd_result.get('error', '获取失败')}")
 
     # ④ 宏观流动性：M2 / 10年国债收益率（ChinaMoney API）
     print("        宏观流动性    ⬇ 自动获取（M2/社融/10年国债）...", end=" ", flush=True)
     liq_result = fundamental_mod.fetch_macro_liquidity()
-    if "error" not in liq_result:
-        liq_period = liq_result.get("period", "?")
-        m2_v   = liq_result.get("m2_yoy")
-        b10y_v = liq_result.get("bond_10y")
-        src_liq = liq_result.get("source", "")
+    if liq_result.get("data") is not None:
+        liq_data = liq_result.get("data", {})
+        liq_period = liq_data.get("period", "?")
+        m2_v   = liq_data.get("m2_yoy")
+        b10y_v = liq_data.get("bond_10y")
+        src_liq = liq_data.get("source", "")
         src_label_liq = "本地缓存" if src_liq == "csv_cache" else "ChinaMoney实时"
         liq_parts = []
         if m2_v is not None:
             liq_parts.append(f"M2同比 {m2_v:.1f}%")
         if b10y_v is not None:
-            bond_code = liq_result.get("bond_10y_code", "")
+            bond_code = liq_data.get("bond_10y_code", "")
             liq_parts.append(f"10年国债YTM {b10y_v:.2f}%（{bond_code}）")
         print(f"✓  [{liq_period}] {'  '.join(liq_parts)}  来源：{src_label_liq}")
     else:
-        print(f"✗  {liq_result['error']}")
+        print(f"✗  {liq_result.get('error', '获取失败')}")
 
     # 获取 PMI 官方解读（融合数据）
     print("        PMI官方解读  ⬇ 自动获取（国家统计局）...", end=" ", flush=True)

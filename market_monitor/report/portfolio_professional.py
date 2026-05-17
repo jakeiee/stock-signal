@@ -29,6 +29,15 @@ import tushare as ts
 import warnings
 warnings.filterwarnings('ignore')
 
+# 仓位管理模块
+from market_monitor.analysis.position_manager import PositionManager, Market
+
+# 估值数据源
+from market_monitor.data_sources.valuation import fetch_market_valuation
+from market_monitor.data_sources.hk_valuation import fetch_hk_valuation
+from market_monitor.data_sources.hk_tech_valuation import fetch_hk_tech_valuation
+from market_monitor.data_sources.shiller_api import fetch_us_cape_valuation
+
 # ── ETF指数映射表（从 etf_index_mapping.csv 加载）─────────────────────────────
 ETF_MAPPING = {
     "159202": {"name": "恒生互联网ETF", "index": "HKHSIII", "index_name": "恒生互联网科技业指数"},
@@ -345,12 +354,19 @@ def get_etf_nav(code: str) -> tuple:
 class ProfessionalETFReportGenerator:
     """专业版ETF持仓分析报告生成器"""
 
-    def __init__(self, results: List[Dict]):
+    # 仓位展示样式常量
+    PM_STYLE_COMPACT = "compact"    # 简洁总览
+    PM_STYLE_MARKET = "market"      # 市场明细
+    PM_STYLE_ACTION = "action"      # 行动聚焦（默认）
+
+    def __init__(self, results: List[Dict], pm_style: str = None):
         self.results = results
         beijing_tz = timezone(timedelta(hours=8))
         self.now = datetime.now(beijing_tz)
         self.report_time = self.now.strftime("%Y-%m-%d %H:%M")
         self.report_date = self.now.strftime("%Y-%m-%d")
+        # 仓位展示样式，默认使用行动聚焦
+        self.pm_style = pm_style or self.PM_STYLE_ACTION
 
     def _escape(self, text: str) -> str:
         """转义XML特殊字符"""
@@ -421,6 +437,507 @@ class ProfessionalETFReportGenerator:
         else:
             if rsi < 30: return "等待"
             return "减仓"
+
+    def _fetch_realtime_valuations(self) -> dict:
+        """
+        实时获取各市场估值百分位。
+
+        Returns:
+            {
+                "a_stock": {"percentile": float, "source": str, "error": str|None},
+                "hk_stock": {"percentile": float, "source": str, "error": str|None},
+                "us_stock": {"percentile": float, "source": str, "error": str|None},
+            }
+        """
+        results = {}
+
+        # 1. A股估值 - 万得全A PE/PB百分位
+        print("  [仓位管理] 查询A股估值...")
+        try:
+            a_data = fetch_market_valuation()
+            if a_data.get("error") or not a_data.get("data"):
+                results["a_stock"] = {"percentile": None, "source": "N/A", "error": a_data.get("error", "无数据")}
+            else:
+                data = a_data["data"]
+                # 综合PE和PB百分位（PE权重更高）
+                pe_pct = data.get("pe_pct") or 50.0
+                pb_pct = data.get("pb_pct") or 50.0
+                # 如果只有PE百分位，PB百分位缺失，则使用PE百分位
+                if data.get("pe_pct") is not None and data.get("pb_pct") is not None:
+                    composite_pct = pe_pct * 0.6 + pb_pct * 0.4
+                else:
+                    composite_pct = pe_pct or 50.0
+                results["a_stock"] = {
+                    "percentile": composite_pct,
+                    "source": f"万得全A (PE={data.get('pe')}, PB={data.get('pb')})",
+                    "error": None,
+                }
+                print(f"           A股: PE百分位={data.get('pe_pct')}%, PB百分位={data.get('pb_pct')}%, 综合={composite_pct:.1f}%")
+        except Exception as e:
+            results["a_stock"] = {"percentile": None, "source": "N/A", "error": str(e)}
+            print(f"           A股估值获取失败: {e}")
+
+        # 2. 港股估值 - 恒生科技指数
+        print("  [仓位管理] 查询港股估值...")
+        try:
+            hk_data = fetch_hk_tech_valuation()
+            if hk_data.get("error") or not hk_data.get("pe"):
+                # 降级到恒生指数
+                hk_data = fetch_hk_valuation()
+                if hk_data.get("error") or not hk_data.get("pe"):
+                    results["hk_stock"] = {"percentile": None, "source": "N/A", "error": "获取失败"}
+                else:
+                    pct = hk_data.get("pct_10y") or 50.0
+                    results["hk_stock"] = {
+                        "percentile": pct,
+                        "source": f"恒生指数 (PE={hk_data.get('pe')}, 10年分位={pct}%)",
+                        "error": None,
+                    }
+                    print(f"           港股: PE={hk_data.get('pe')}, 10年分位={pct}%")
+            else:
+                # 使用恒生科技指数
+                pe_pct = hk_data.get("pe_percentile") * 100 if hk_data.get("pe_percentile") else 50.0
+                pb_pct = hk_data.get("pb_percentile") * 100 if hk_data.get("pb_percentile") else 50.0
+                # 综合PE和PB百分位
+                composite_pct = pe_pct * 0.6 + pb_pct * 0.4
+                results["hk_stock"] = {
+                    "percentile": composite_pct,
+                    "source": f"恒生科技 (PE={hk_data.get('pe')}, PB={hk_data.get('pb')}, 综合={composite_pct:.1f}%)",
+                    "error": None,
+                }
+                print(f"           港股: 恒生科技 PE={hk_data.get('pe')}, PE分位={pe_pct:.1f}%, PB分位={pb_pct:.1f}%, 综合={composite_pct:.1f}%")
+        except Exception as e:
+            results["hk_stock"] = {"percentile": None, "source": "N/A", "error": str(e)}
+            print(f"           港股估值获取失败: {e}")
+
+        # 3. 美股估值 - S&P 500 CAPE
+        print("  [仓位管理] 查询美股估值...")
+        try:
+            us_data = fetch_us_cape_valuation()
+            if us_data.get("error") or not us_data.get("cape"):
+                results["us_stock"] = {"percentile": None, "source": "N/A", "error": us_data.get("error", "获取失败")}
+            else:
+                pct = us_data.get("cape_10y_pct") or 50.0
+                results["us_stock"] = {
+                    "percentile": pct,
+                    "source": f"标普500 CAPE (CAPE={us_data.get('cape')}, 10年分位={pct}%)",
+                    "error": None,
+                }
+                print(f"           美股: CAPE={us_data.get('cape')}, 10年分位={pct}%")
+        except Exception as e:
+            results["us_stock"] = {"percentile": None, "source": "N/A", "error": str(e)}
+            print(f"           美股估值获取失败: {e}")
+
+        return results
+
+    def _calculate_position_manager(self) -> dict:
+        """
+        计算仓位管理建议。
+
+        实时获取各市场的实际估值百分位，由 PositionManager 计算仓位配置。
+        同时计算当前实际持仓分布用于对比。
+
+        Returns:
+            包含详细系数计算的仓位管理结果
+        """
+        if not self.results:
+            return {"error": "无持仓数据"}
+
+        try:
+            pm = PositionManager()
+
+            # 从持仓数据中推断市场分布
+            # 港股相关ETF：513180(恒生科技), 159202(恒生互联网), 159217(港股创新药)
+            # A股相关ETF：159852(软件), 159869(游戏), 562500(机器人)
+            # 香港证券ETF：513090 归入港股
+            hk_etfs = {"513180", "159202", "159217", "513090"}
+            a_etfs = {"159852", "159869", "562500"}
+
+            hk_value = sum(r.get('market_value', 0) for r in self.results if r.get('etf_code') in hk_etfs)
+            a_value = sum(r.get('market_value', 0) for r in self.results if r.get('etf_code') in a_etfs)
+            us_value = 0  # 当前无美股ETF持仓
+            total_value = sum(r.get('market_value', 0) for r in self.results)
+
+            # 当前各市场实际仓位比例
+            current_hk_ratio = hk_value / total_value if total_value else 0
+            current_a_ratio = a_value / total_value if total_value else 0
+            current_us_ratio = us_value / total_value if total_value else 0
+            current_cash_ratio = 0  # 假设无现金，若有需单独计算
+
+            # 根据持仓分布估算趋势信号
+            strong_count = sum(1 for r in self.results if r.get('signal') == 'STRONG')
+            watch_count = sum(1 for r in self.results if r.get('signal') == 'WATCH')
+            danger_count = sum(1 for r in self.results if r.get('signal') == 'DANGER')
+
+            # 整体趋势判断
+            if danger_count >= len(self.results) * 0.6:
+                overall_trend = "bearish"
+            elif strong_count >= len(self.results) * 0.4:
+                overall_trend = "bullish"
+            else:
+                overall_trend = "neutral"
+
+            # 实时获取各市场估值百分位
+            print("\n📊 实时估值查询:")
+            valuation_data = self._fetch_realtime_valuations()
+
+            # 构建估值字典（使用默认值50%作为兜底）
+            default_val = 50.0
+            valuations = {
+                Market.A_STOCK: valuation_data.get("a_stock", {}).get("percentile") or default_val,
+                Market.HK_STOCK: valuation_data.get("hk_stock", {}).get("percentile") or default_val,
+                Market.US_STOCK: valuation_data.get("us_stock", {}).get("percentile") or default_val,
+            }
+
+            # 趋势方向
+            from market_monitor.analysis.position_manager import TrendDirection
+            trends = {
+                Market.A_STOCK: TrendDirection.NEUTRAL,
+                Market.HK_STOCK: TrendDirection(overall_trend) if overall_trend != "neutral" else TrendDirection.NEUTRAL,
+                Market.US_STOCK: TrendDirection.NEUTRAL,
+            }
+
+            active_signals = {
+                Market.A_STOCK: "neutral",
+            }
+
+            result = pm.get_market_allocation(valuations, trends, active_signals)
+
+            # 添加估值数据来源信息
+            result["valuation_sources"] = {
+                "a_stock": valuation_data.get("a_stock", {}),
+                "hk_stock": valuation_data.get("hk_stock", {}),
+                "us_stock": valuation_data.get("us_stock", {}),
+            }
+            
+            # 添加当前持仓对比信息
+            market_alloc = result.get("market_allocations", {})
+            
+            # 计算当前市值对应的目标市值
+            for market_id, data in market_alloc.items():
+                if market_id == Market.A_STOCK.value:
+                    data["current_weight"] = current_a_ratio
+                elif market_id == Market.HK_STOCK.value:
+                    data["current_weight"] = current_hk_ratio
+                elif market_id == Market.US_STOCK.value:
+                    data["current_weight"] = current_us_ratio
+                else:
+                    data["current_weight"] = 0
+                    
+                # 计算调整方向和金额
+                target_w = data.get("target_weight", 0)
+                current_w = data.get("current_weight", 0)
+                data["weight_diff"] = target_w - current_w
+                
+                # 调整方向
+                if data["weight_diff"] > 0.02:
+                    data["action"] = "增配"
+                elif data["weight_diff"] < -0.02:
+                    data["action"] = "减配"
+                else:
+                    data["action"] = "持稳"
+            
+            # 添加额外信息
+            result["analysis"] = {
+                "total_value": total_value,
+                "hk_value": hk_value,
+                "a_value": a_value,
+                "current_hk_ratio": current_hk_ratio,
+                "current_a_ratio": current_a_ratio,
+                "current_us_ratio": current_us_ratio,
+                "signal_distribution": {
+                    "strong": strong_count,
+                    "watch": watch_count,
+                    "danger": danger_count,
+                },
+                "overall_trend": overall_trend,
+            }
+            
+            return result
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    def _build_pm_xml_block(self, pm_result: dict, style: str = "market") -> str:
+        """
+        构建仓位管理XML区块 - 简洁展示建议仓位与当前仓位对比。
+
+        Args:
+            pm_result: 仓位管理计算结果
+            style: 展示样式
+                - "compact": 简洁总览 + 调整方向
+                - "market": 分市场当前 vs 建议对比
+                - "action": 聚焦行动建议（增配/减配）
+        """
+        if not pm_result or "error" in pm_result:
+            return ""
+
+        total_equity = pm_result.get("total_equity_ratio", 0) * 100
+        cash_ratio = pm_result.get("cash_ratio", 0) * 100
+        total_value = pm_result.get("analysis", {}).get("total_value", 0)
+
+        # 映射表
+        val_level_map = {
+            "extremely_low": "极度低估",
+            "low": "低估",
+            "fair": "合理",
+            "high": "偏高",
+            "extremely_high": "极度偏高",
+        }
+        trend_map = {
+            "bullish": "🟢上涨",
+            "bearish": "🔴下跌",
+            "neutral": "🟡中性",
+        }
+
+        # 收集市场数据
+        market_alloc = pm_result.get("market_allocations", {})
+        market_details = []
+        for market_id, data in market_alloc.items():
+            name = data.get("name", market_id)
+            val_level = data.get("valuation_level", "")
+            val_label = val_level_map.get(val_level, val_level) if val_level else "?"
+            val_pct = data.get("valuation_percentile", 0)
+            trend = data.get("trend", "neutral")
+            trend_icon = trend_map.get(trend, "🟡")
+            target_w = data.get("target_weight", 0) * 100
+            current_w = data.get("current_weight", 0) * 100
+            diff = data.get("weight_diff", 0) * 100
+            action = data.get("action", "持稳")
+
+            market_details.append({
+                "name": name,
+                "val_label": val_label,
+                "val_pct": val_pct,
+                "trend_icon": trend_icon,
+                "target_w": target_w,
+                "current_w": current_w,
+                "diff": diff,
+                "action": action,
+            })
+
+        # ── 样式1: 简洁总览 ─────────────────────────────────────────────────────
+        if style == "compact":
+            xml = f"""
+<h1>五、仓位管理建议</h1>
+
+<table>
+  <thead><tr><th>指标</th><th>当前</th><th>建议</th><th>调整</th></tr></thead>
+  <tbody>
+    <tr><td>权益仓位</td><td>{100 - cash_ratio:.0f}%</td><td>⚖️ {total_equity:.0f}%</td><td>{total_equity - (100 - cash_ratio):+.0f}%</td></tr>
+    <tr><td>现金/债券</td><td>{cash_ratio:.0f}%</td><td>💵 {cash_ratio:.0f}%</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<h2>📊 各市场仓位对比</h2>
+<table>
+  <thead><tr><th>市场</th><th>当前仓位</th><th>建议仓位</th><th>调整方向</th></tr></thead>
+  <tbody>
+"""
+            for m in market_details:
+                diff_emoji = "📈" if m['diff'] > 2 else ("📉" if m['diff'] < -2 else "➖")
+                xml += f"""    <tr>
+      <td>{m['name']}</td>
+      <td>{m['current_w']:.1f}%</td>
+      <td>{m['target_w']:.1f}%</td>
+      <td>{diff_emoji} {m['action']}</td>
+    </tr>
+"""
+            xml += "  </tbody>\n</table>"
+            return xml
+
+        # ── 样式2: 市场明细对比 ───────────────────────────────────────────────
+        elif style == "market":
+            xml = f"""
+<h1>五、仓位管理建议</h1>
+
+<h2>📊 各市场仓位对比</h2>
+<table>
+  <thead><tr><th>市场</th><th>估值</th><th>趋势</th><th>当前仓位</th><th>建议仓位</th><th>差异</th></tr></thead>
+  <tbody>
+"""
+            for m in market_details:
+                diff_str = f"+{m['diff']:.1f}%" if m['diff'] >= 0 else f"{m['diff']:.1f}%"
+                xml += f"""    <tr>
+      <td>{m['name']}</td>
+      <td>{m['val_label']} ({m['val_pct']:.0f}%)</td>
+      <td>{m['trend_icon']}</td>
+      <td>{m['current_w']:.1f}%</td>
+      <td><b>{m['target_w']:.1f}%</b></td>
+      <td>{diff_str}</td>
+    </tr>
+"""
+            xml += """  </tbody>
+</table>
+
+<h2>📌 目标仓位总览</h2>
+<table>
+  <thead><tr><th>类型</th><th>建议比例</th></tr></thead>
+  <tbody>
+    <tr><td>权益仓位</td><td>⚖️ {total_equity:.0f}%</td></tr>
+    <tr><td>现金/债券</td><td>💵 {cash_ratio:.0f}%</td></tr>
+  </tbody>
+</table>""".format(total_equity=total_equity, cash_ratio=cash_ratio)
+            return xml
+
+        # ── 样式3: 行动聚焦 ───────────────────────────────────────────────────
+        else:  # action
+            xml = f"""
+<h1>五、仓位调整建议</h1>
+
+<table>
+  <thead><tr><th>市场</th><th>当前→建议</th><th>调整</th><th>操作</th></tr></thead>
+  <tbody>
+"""
+            for m in market_details:
+                if m['diff'] > 2:
+                    op = "📈 增配"
+                elif m['diff'] < -2:
+                    op = "📉 减配"
+                else:
+                    op = "➖ 持稳"
+
+                if abs(m['diff']) > 5:
+                    priority = "⭐"
+                else:
+                    priority = ""
+
+                xml += f"""    <tr>
+      <td>{m['name']}</td>
+      <td>{m['current_w']:.0f}% → {m['target_w']:.0f}%</td>
+      <td>{m['diff']:+.0f}%</td>
+      <td>{op} {priority}</td>
+    </tr>
+"""
+            xml += """  </tbody>
+</table>
+
+<p><i>* 当前仓位基于持仓市值计算，建议仓位基于模型配置</i></p>
+<p><i>* ⭐ 表示调整幅度较大，建议优先处理</i></p>
+"""
+            return xml
+
+    def _build_pm_feishu_block(self, pm_result: dict, style: str = "action") -> str:
+        """
+        构建仓位管理飞书卡片区块 - 简洁展示建议仓位与当前仓位对比。
+
+        Args:
+            pm_result: 仓位管理计算结果
+            style: 展示样式
+                - "compact": 简洁总览 + 调整方向
+                - "market": 分市场当前 vs 建议对比
+                - "action": 聚焦行动建议（增配/减配）
+                - "mini": 迷你卡片（小巧紧凑）
+        """
+        if not pm_result or "error" in pm_result:
+            return ""
+
+        total_equity = pm_result.get("total_equity_ratio", 0) * 100
+        cash_ratio = pm_result.get("cash_ratio", 0) * 100
+
+        # 映射表
+        val_level_map = {
+            "extremely_low": "极度低估",
+            "low": "低估",
+            "fair": "合理",
+            "high": "偏高",
+            "extremely_high": "极度偏高",
+        }
+        trend_map = {
+            "bullish": "🟢上涨",
+            "bearish": "🔴下跌",
+            "neutral": "🟡中性",
+        }
+
+        # 收集市场数据
+        market_alloc = pm_result.get("market_allocations", {})
+        market_details = []
+        for market_id, data in market_alloc.items():
+            name = data.get("name", market_id)
+            val_level = data.get("valuation_level", "")
+            val_label = val_level_map.get(val_level, val_level) if val_level else "?"
+            val_pct = data.get("valuation_percentile", 0)
+            trend = data.get("trend", "neutral")
+            trend_icon = trend_map.get(trend, "🟡")
+            target_w = data.get("target_weight", 0) * 100
+            current_w = data.get("current_weight", 0) * 100
+            diff = data.get("weight_diff", 0) * 100
+            action = data.get("action", "持稳")
+
+            market_details.append({
+                "name": name,
+                "val_label": val_label,
+                "val_pct": val_pct,
+                "trend_icon": trend_icon,
+                "target_w": target_w,
+                "current_w": current_w,
+                "diff": diff,
+                "action": action,
+            })
+
+        # ── 样式1: 简洁总览 ─────────────────────────────────────────────────────
+        if style == "compact":
+            lines = []
+            lines.append("**📊 仓位管理建议**")
+            lines.append(f"⚖️ 权益建议 **{total_equity:.0f}%** | 💵 现金 **{cash_ratio:.0f}%**")
+            lines.append("")
+            lines.append("**📈 各市场调整方向**")
+            lines.append("| 市场 | 当前 | 建议 | 方向 |")
+            lines.append("|:---|:---:|:---:|:---|")
+            for m in market_details:
+                arrow = "↑" if m['diff'] > 2 else ("↓" if m['diff'] < -2 else "—")
+                lines.append(f"| {m['name']} | {m['current_w']:.0f}% | {m['target_w']:.0f}% | {arrow} {m['action']} |")
+            return "\n".join(lines)
+
+        # ── 样式2: 市场明细对比 ─────────────────────────────────────────────────
+        elif style == "market":
+            lines = []
+            lines.append("**📊 各市场仓位对比**")
+            lines.append("| 市场 | 估值 | 趋势 | 当前 | 建议 | 差异 |")
+            lines.append("|:---|:---:|:---|:---:|:---:|:---:|")
+            for m in market_details:
+                diff_str = f"+{m['diff']:.1f}%" if m['diff'] >= 0 else f"{m['diff']:.1f}%"
+                lines.append(
+                    f"| {m['name']} | {m['val_label']} | {m['trend_icon']} | {m['current_w']:.1f}% | **{m['target_w']:.1f}%** | {diff_str} |"
+                )
+            return "\n".join(lines)
+
+        # ── 样式3: 行动聚焦（默认）──────────────────────────────────────────────
+        elif style == "action":
+            lines = []
+            lines.append("**📊 仓位调整建议**")
+            lines.append("")
+            for m in market_details:
+                if m['diff'] > 2:
+                    op = "📈增配"
+                elif m['diff'] < -2:
+                    op = "📉减配"
+                else:
+                    op = "➖持稳"
+                lines.append(
+                    f"• **{m['name']}**: {m['current_w']:.0f}%→{m['target_w']:.0f}% ({m['diff']:+.0f}%) {op}"
+                )
+            lines.append("")
+            lines.append(f"⚖️ 目标仓位：权益 **{total_equity:.0f}%** / 现金 **{cash_ratio:.0f}%**")
+            return "\n".join(lines)
+
+        # ── 样式4: 迷你卡片 ─────────────────────────────────────────────────────
+        else:  # mini
+            lines = []
+            lines.append("**仓位调整速览**")
+            for m in market_details:
+                if m['diff'] > 2:
+                    icon = "🟢"
+                    action_text = "可增配"
+                elif m['diff'] < -2:
+                    icon = "🔴"
+                    action_text = "可减配"
+                else:
+                    icon = "⚪"
+                    action_text = "持稳"
+                lines.append(f"{icon} **{m['name']}**: {m['current_w']:.0f}%→{m['target_w']:.0f}% ({m['diff']:+.0f}%) {action_text}")
+            return "\n".join(lines)
 
     def generate(self) -> str:
         """生成完整报告"""
@@ -512,6 +1029,10 @@ class ProfessionalETFReportGenerator:
         
         advice_content = "<ul>" + "".join([f"<li>{item}</li>" for item in advice_items]) + "</ul>" if advice_items else "<p>暂无明确操作建议</p>"
 
+        # 仓位管理建议
+        pm_result = self._calculate_position_manager()
+        pm_block = self._build_pm_xml_block(pm_result, style=self.pm_style)
+
         # 生成XML
         xml = f"""<title>ETF持仓分析报告 {self.report_date}</title>
 
@@ -558,6 +1079,7 @@ class ProfessionalETFReportGenerator:
 
 <h1>四、风险提示</h1>
 <p>{risk_content}</p>
+{pm_block}
 
 <callout emoji="⚠️" background-color="light-yellow" border-color="yellow">
   <p>本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。</p>
@@ -653,6 +1175,14 @@ class ProfessionalETFReportGenerator:
             {'tag': 'div', 'text': {'tag': 'lark_md', 'content': content}}
         ]
         
+        # ── 仓位管理区块 ────────────────────────────────────────────────────────
+        pm_result = self._calculate_position_manager()
+        if pm_result and "error" not in pm_result:
+            pm_block = self._build_pm_feishu_block(pm_result, style=self.pm_style)
+            if pm_block:
+                elements.append({'tag': 'hr'})
+                elements.append({'tag': 'div', 'text': {'tag': 'lark_md', 'content': pm_block}})
+        
         # 添加文档链接按钮
         if doc_url:
             elements.append({
@@ -721,6 +1251,10 @@ def main():
     parser = argparse.ArgumentParser(description="ETF持仓专业分析报告")
     parser.add_argument("--feishu", "-f", action="store_true", help="发送飞书消息")
     parser.add_argument("--positions", "-p", default="data/positions.json", help="持仓文件路径")
+    parser.add_argument("--pm-style", "-s", 
+                        choices=["compact", "market", "action", "all"],
+                        default="action",
+                        help="仓位展示样式: compact=简洁总览, market=市场明细, action=行动聚焦(默认), all=全部样式")
     args = parser.parse_args()
     
     print(f"\n{'='*60}")
@@ -802,8 +1336,39 @@ def main():
         print("❌ 无有效分析结果")
         return
 
+    # 根据参数确定仓位展示样式
+    pm_style = args.pm_style if args.pm_style != "all" else ProfessionalETFReportGenerator.PM_STYLE_ACTION
+
     # 生成专业版报告
-    generator = ProfessionalETFReportGenerator(results)
+    generator = ProfessionalETFReportGenerator(results, pm_style=pm_style)
+    
+    # 如果选择 all 样式，生成多个版本的报告
+    if args.pm_style == "all":
+        styles = {
+            "compact": "简洁总览版",
+            "market": "市场明细版",
+            "action": "行动聚焦版"
+        }
+        print(f"\n📋 仓位展示样式选择: 全部样式 (3个版本)")
+        print("=" * 60)
+        
+        for style_name, style_desc in styles.items():
+            print(f"\n【{style_desc}】")
+            pm_result = generator._calculate_position_manager()
+            if pm_result and "error" not in pm_result:
+                # XML版
+                xml_block = generator._build_pm_xml_block(pm_result, style=style_name)
+                print(xml_block)
+                print("-" * 40)
+                # 飞书版
+                feishu_block = generator._build_pm_feishu_block(pm_result, style=style_name)
+                print(feishu_block)
+            print()
+        print("=" * 60)
+        print("💡 请选择一个样式，使用 -s <style> 参数生成正式报告")
+        print("   例如: python3 -m market_monitor.report.portfolio_professional -s action")
+        return
+    
     doc_id, doc_url = generator.create_doc()
 
     if doc_url:

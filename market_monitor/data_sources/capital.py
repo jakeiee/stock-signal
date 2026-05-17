@@ -61,6 +61,82 @@ def _append_csv(name: str, row: Dict, key_col: str = "date") -> None:
     df.to_csv(path, index=False)
 
 
+def recalculate_znz_signals() -> Dict[str, Any]:
+    """
+    重新计算所有活跃市值数据的信号并保存。
+    
+    规则：
+    - 入场信号：单日涨幅 >= 4.0%
+    - 离场信号：单日跌幅 <= -2.3%
+    - 多头区间：入场后未离场
+    - 空头区间：离场后未入场
+    
+    返回：{
+        "updated_count": int,  # 更新的记录数
+        "signals": [{"date": str, "chg_pct": float, "zone_type": str, "signal": str}, ...]
+    }
+    """
+    csv_path = _csv_path("znz_active_cap.csv")
+    if not os.path.exists(csv_path):
+        return {"error": "文件不存在", "updated_count": 0}
+    
+    df = pd.read_csv(csv_path)
+    if df.empty or len(df) < 2:
+        return {"error": "数据不足", "updated_count": 0}
+    
+    # 按日期排序
+    df = df.sort_values("date").reset_index(drop=True)
+    
+    # 入场/离场阈值
+    ENTRY_THRESHOLD = 4.0
+    EXIT_THRESHOLD = -2.3
+    
+    # 计算信号
+    results = []
+    last_signal = None
+    last_signal_date = None
+    
+    for i, row in df.iterrows():
+        chg_pct = float(row["chg_pct"]) if pd.notna(row.get("chg_pct")) else None
+        
+        if chg_pct is not None:
+            if chg_pct >= ENTRY_THRESHOLD:
+                last_signal = "entry"
+                last_signal_date = row["date"]
+            elif chg_pct <= EXIT_THRESHOLD:
+                last_signal = "exit"
+                last_signal_date = row["date"]
+        
+        # 判断区间类型
+        if last_signal == "entry":
+            zone_type = "bullish"
+        elif last_signal == "exit":
+            zone_type = "bearish"
+        else:
+            zone_type = "neutral"
+        
+        results.append({
+            "date": row["date"],
+            "chg_pct": chg_pct,
+            "zone_type": zone_type,
+            "signal": last_signal,
+            "signal_date": last_signal_date,
+        })
+    
+    # 更新 DataFrame
+    df["zone_type"] = [r["zone_type"] for r in results]
+    df["signal"] = [r["signal"] for r in results]
+    
+    # 保存
+    df.to_csv(csv_path, index=False)
+    
+    return {
+        "updated_count": len(df),
+        "latest": results[-1] if results else None,
+        "all": results,
+    }
+
+
 def _csindex_ohlcv(csindex_code: str = "000985", days: int = 30) -> pd.DataFrame:
     """从 中证官网 获取日线 OHLCV 数据（pandas DataFrame）。"""
     end = datetime.now().strftime("%Y%m%d")

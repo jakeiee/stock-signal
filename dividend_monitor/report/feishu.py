@@ -47,6 +47,144 @@ def _score_icon(score: float) -> str:
     return "🔴🔴"
 
 
+def _pm_market_icon(market_id: str) -> str:
+    """仓位管理市场图标。"""
+    icons = {
+        "a_stock": "🇨🇳",
+        "hk_stock": "🇭🇰",
+        "us_stock": "🇺🇸",
+    }
+    return icons.get(market_id, "🌐")
+
+
+def _pm_style_icon(style_id: str) -> str:
+    """仓位管理风格图标。"""
+    icons = {
+        "high_elasticity": "🚀",
+        "high_dividend": "💰",
+        "balanced": "⚖️",
+    }
+    return icons.get(style_id, "📊")
+
+
+def _pm_action_icon(action: str) -> str:
+    """调仓动作图标。"""
+    icons = {
+        "buy": "📈",
+        "sell": "📉",
+        "hold": "➡️",
+        "reduce": "⬇️",
+        "quit": "❌",
+        "watch": "👀",
+    }
+    return icons.get(action, "➡️")
+
+
+def _build_position_manager_block(pm_result: dict) -> str:
+    """
+    构建仓位管理区块文本。
+
+    Args:
+        pm_result: PositionManager.get_market_allocation() 返回的结果
+
+    Returns:
+        格式化的 Markdown 文本
+    """
+    if not pm_result or "error" in pm_result:
+        return ""
+
+    blocks = []
+
+    # 标题
+    blocks.append("**📊 仓位管理建议**")
+
+    # 权益/现金比例
+    total_equity = pm_result.get("total_equity_ratio", 0) * 100
+    cash_ratio = pm_result.get("cash_ratio", 0) * 100
+    blocks.append(f"　⚖️ 权益仓位 **{total_equity:.0f}%**　💵 现金/债券 **{cash_ratio:.0f}%**")
+
+    # 市场配置
+    market_alloc = pm_result.get("market_allocations", {})
+    if market_alloc:
+        blocks.append("")
+        blocks.append("**🌏 市场配置（权益仓位内部分布）**")
+        for market_id, data in market_alloc.items():
+            icon = _pm_market_icon(market_id)
+            name = data.get("name", market_id)
+            ratio = data.get("raw_weight", 0) * 100
+            # 获取估值水平
+            val_level_map = {
+                "extremely_low": "极度低估",
+                "low": "低估",
+                "fair": "合理",
+                "high": "偏高",
+                "extremely_high": "极度偏高",
+            }
+            val_level = data.get("valuation_level", "")
+            val_label = val_level_map.get(val_level, val_level) if val_level else "未知"
+            # 趋势图标
+            trend_map = {
+                "bullish": "🟢",
+                "bearish": "🔴",
+                "neutral": "🟡",
+            }
+            trend = data.get("trend", "neutral")
+            trend_icon = trend_map.get(trend, "🟡")
+
+            blocks.append(
+                f"　{icon} {name}\n"
+                f"　　占比 {ratio:.1f}%　{trend_icon}趋势 {val_label}"
+            )
+
+    # 风格配置
+    style_alloc = pm_result.get("style_allocations", {})
+    if style_alloc:
+        blocks.append("")
+        blocks.append("**🎯 风格配置（权益仓位内部分布）**")
+        for style_id, data in style_alloc.items():
+            icon = _pm_style_icon(style_id)
+            name = data.get("name", style_id)
+            target = data.get("target_weight", 0) * 100
+            current = data.get("current_weight", 0) * 100
+            if current > 0:
+                blocks.append(f"　{icon} {name} 目标 **{target:.0f}%**")
+            else:
+                blocks.append(f"　{icon} {name} 目标 **{target:.0f}%**")
+
+    # 调仓建议摘要
+    rebalance_items = pm_result.get("rebalance_items", [])
+    if rebalance_items:
+        blocks.append("")
+        blocks.append("**⚠️ 调仓建议**")
+
+        # 只显示调整幅度最大的前3个
+        top_adjustments = sorted(
+            rebalance_items,
+            key=lambda x: abs(x.get("adjustment", 0)),
+            reverse=True
+        )[:3]
+
+        for item in top_adjustments:
+            code = item.get("code", "")
+            name = item.get("name", "")[:8]
+            current = item.get("current_weight", 0) * 100
+            target = item.get("target_weight", 0) * 100
+            adj = item.get("adjustment", 0) * 100
+            action = item.get("stop_loss_action", "hold")
+            action_icon = _pm_action_icon(action)
+
+            adj_str = f"+{adj:.1f}%" if adj >= 0 else f"{adj:.1f}%"
+            if abs(adj) < 0.5:
+                adj_str = "—"
+
+            blocks.append(
+                f"　{action_icon} {code} {name}\n"
+                f"　　{current:.1f}% → {target:.1f}% ({adj_str})"
+            )
+
+    return "\n".join(blocks)
+
+
 def build_card(
     val_results: list,
     kdj_data: dict,
@@ -55,6 +193,7 @@ def build_card(
     now: str,
     mkt_result: Optional[dict] = None,
     pos_result: Optional[dict] = None,
+    pm_result: Optional[dict] = None,
 ) -> dict:
     """
     构建飞书交互式卡片消息体。
@@ -67,6 +206,7 @@ def build_card(
         now:            报告生成时间字符串。
         mkt_result:     全市场成交额结果字典（可选）。
         pos_result:     动态仓位建议字典（可选）。
+        pm_result:      仓位管理建议字典（可选，来自 PositionManager）。
 
     Returns:
         可直接传入 requests.post(json=...) 的飞书消息字典。
@@ -212,6 +352,13 @@ def build_card(
             f"　*不构成投资建议*"
         )
         elements.append({"tag": "div", "text": {"tag": "lark_md", "content": pos_block}})
+
+    # ── 仓位管理区块 ──────────────────────────────────────────────────────────
+    if pm_result and "error" not in pm_result:
+        elements.append({"tag": "hr"})
+        pm_block = _build_position_manager_block(pm_result)
+        if pm_block:
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": pm_block}})
 
     return {
         "msg_type": "interactive",

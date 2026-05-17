@@ -551,3 +551,31 @@ attempted relative import with no known parent package
 - Tags: automatic, error, dividend_monitor
 
 ---
+
+## [ERR-20260429-001] feishu.send (dividend_monitor)
+
+**Logged**: 2026-04-29T22:00:11.976133
+**Priority**: low
+**Status**: pending
+**Area**: finance_analysis
+
+### Summary
+股息指数报告飞书推送失败
+
+### Error
+```
+飞书API调用失败
+```
+
+### Context
+推送时间: 2026-04-29 21:59
+
+### Suggested Fix
+检查飞书机器人配置和网络连接
+
+### Metadata
+- Module: dividend_monitor
+- Reproducible: yes
+- Tags: automatic, error, dividend_monitor
+
+---
