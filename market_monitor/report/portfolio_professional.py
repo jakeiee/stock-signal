@@ -1174,21 +1174,33 @@ class ProfessionalETFReportGenerator:
         doc_id = doc_data.get('document_id', '')
         doc_url = f"https://my.feishu.cn/docx/{doc_id}"
 
-        # 2. 使用 raw_content API 写入完整内容（支持 JSON 格式）
+        # 2. 写入纯文本内容（用 text block）
         content_xml = self.generate()
-        # 提取纯文本内容（去标签，保留基本结构）
         plain_text = re.sub(r'<[^>]+>', '', content_xml)
-        plain_text = re.sub(r'\n{3,}', '\n\n', plain_text)
+        plain_text = re.sub(r'\n{3,}', '\n\n', plain_text).strip()
 
-        # 用 content API 替换整个文档内容
-        write_resp = requests.put(
-            f'https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/raw_content',
+        # 拆分为段落
+        paragraphs = [p.strip() for p in plain_text.split('\n\n') if p.strip()]
+
+        # 飞书文档 block 格式：text block
+        blocks = []
+        for para in paragraphs[:200]:  # 限制最多200段
+            blocks.append({
+                'block_type': 2,  # 2 = text block
+                'text': {
+                    'elements': [{'text_run': {'content': para}}],
+                    'style': {}
+                }
+            })
+
+        write_resp = requests.post(
+            f'https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children',
             headers=headers,
-            json={'content': plain_text},
+            json={'children': blocks, 'index': 0},
             timeout=30
         )
         write_data = write_resp.json()
-        print(f"   写入内容响应: {write_data}")
+        print(f"   写入内容响应: code={write_data.get('code')}, msg={write_data.get('msg', '')}")
 
         if write_data.get('code') == 0:
             print(f"   文档创建成功: {doc_url}")
