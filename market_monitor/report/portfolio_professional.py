@@ -1127,6 +1127,10 @@ class ProfessionalETFReportGenerator:
         import requests
         app_id = os.getenv('LARK_APP_ID', '')
         app_secret = os.getenv('LARK_APP_SECRET', '')
+        # 调试：打印环境变量状态
+        print(f"   [DEBUG] LARK_APP_ID 存在: {bool(app_id)}, 长度: {len(app_id) if app_id else 0}")
+        print(f"   [DEBUG] LARK_APP_SECRET 存在: {bool(app_secret)}, 长度: {len(app_secret) if app_secret else 0}")
+        print(f"   [DEBUG] 所有以 LARK 开头的环境变量: {[(k, v[:6]) for k, v in sorted(os.environ.items()) if k.startswith('LARK')]}")
         if not app_id or not app_secret:
             print("   错误: LARK_APP_ID 或 LARK_APP_SECRET 未设置")
             return None
