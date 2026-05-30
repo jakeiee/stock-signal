@@ -45,6 +45,9 @@ jobs:
           echo "LARK_APP_ID 是否存在: $(if [ -n "$LARK_APP_ID" ]; then echo "yes (长度:${#LARK_APP_ID})"; else echo "no"; fi)"
           echo "LARK_APP_SECRET 是否存在: $(if [ -n "$LARK_APP_SECRET" ]; then echo "yes (长度:${#LARK_APP_SECRET})"; else echo "no"; fi)"
           echo "FEISHU_WEBHOOK 是否存在: $(if [ -n "$FEISHU_WEBHOOK" ]; then echo "yes"; else echo "no"; fi)"
+          # 列出所有可用的 secrets 名称（不打印值）
+          echo "可用的环境变量名:"
+          env | grep -E '^(LARK|FEISHU|TUSHARE)' | cut -d= -f1 || echo "  无"
           # 执行报告生成（包含飞书文档 + 飞书卡片消息）
           python -m market_monitor.report.portfolio_professional --feishu
 
