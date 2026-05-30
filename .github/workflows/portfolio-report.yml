@@ -9,6 +9,7 @@ jobs:
   report:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: LARK_APP  # 指定使用 Environment secrets
     
     env:
       FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
