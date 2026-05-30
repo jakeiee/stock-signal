@@ -39,17 +39,12 @@ jobs:
           EOF
           echo "环境变量文件已创建"
 
-      - name: 执行持仓分析（带重试机制 + 飞书推送）
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          retry_wait_seconds: 60
-          command: |
-            echo "LARK_APP_ID=${LARK_APP_ID:0:6}***"
-            echo "LARK_APP_SECRET 已设置: $(if [ -n "$LARK_APP_SECRET" ]; then echo yes; else echo no; fi)"
-            # 执行报告生成（包含飞书文档 + 飞书卡片消息）
-            python -m market_monitor.report.portfolio_professional --feishu
+      - name: 执行持仓分析 + 飞书推送
+        run: |
+          echo "LARK_APP_ID=${LARK_APP_ID:0:6}***"
+          echo "LARK_APP_SECRET 已设置: $(if [ -n "$LARK_APP_SECRET" ]; then echo yes; else echo no; fi)"
+          # 执行报告生成（包含飞书文档 + 飞书卡片消息）
+          python -m market_monitor.report.portfolio_professional --feishu
 
       - name: 上传报告
         uses: actions/upload-artifact@v4
