@@ -1147,14 +1147,16 @@ class ProfessionalETFReportGenerator:
     def create_doc(self) -> tuple:
         """创建飞书文档 - 使用 OpenAPI"""
         import requests
+        import re
 
         print(f"📄 正在创建飞书文档...")
         token = self._get_feishu_token()
         if not token:
             return None, None
 
-        # 1. 创建空文档
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+        # 1. 创建空文档
         create_resp = requests.post(
             'https://open.feishu.cn/open-apis/docx/v1/documents',
             headers=headers,
@@ -1172,15 +1174,17 @@ class ProfessionalETFReportGenerator:
         doc_id = doc_data.get('document_id', '')
         doc_url = f"https://my.feishu.cn/docx/{doc_id}"
 
-        # 2. 写入内容
-        content = self.generate()
-        # 将 XML 转换为纯文本块
-        blocks = self._convert_xml_to_blocks(content)
+        # 2. 使用 raw_content API 写入完整内容（支持 JSON 格式）
+        content_xml = self.generate()
+        # 提取纯文本内容（去标签，保留基本结构）
+        plain_text = re.sub(r'<[^>]+>', '', content_xml)
+        plain_text = re.sub(r'\n{3,}', '\n\n', plain_text)
 
-        write_resp = requests.post(
-            f'https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children',
+        # 用 content API 替换整个文档内容
+        write_resp = requests.put(
+            f'https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/raw_content',
             headers=headers,
-            json={'children': blocks},
+            json={'content': plain_text},
             timeout=30
         )
         write_data = write_resp.json()
@@ -1188,64 +1192,10 @@ class ProfessionalETFReportGenerator:
 
         if write_data.get('code') == 0:
             print(f"   文档创建成功: {doc_url}")
-            return doc_id, doc_url
         else:
-            print(f"   写入内容失败: {write_data}")
-            return doc_id, doc_url  # 即使写入失败也返回链接，至少文档已创建
+            print(f"   写入内容失败，但文档已创建: {doc_url}")
 
-    def _convert_xml_to_blocks(self, xml_content: str) -> list:
-        """将 XML 内容转换为飞书文档块"""
-        import re
-        blocks = []
-        lines = xml_content.strip().split('\n')
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-
-            # 标题
-            if line.startswith('<h1>'):
-                text = re.sub(r'<h1>|</h1>', '', line)
-                blocks.append({'block_type': 1, 'heading1': {'elements': [{'text_run': {'content': text}}]}})
-            elif line.startswith('<h2>'):
-                text = re.sub(r'<h2>|</h2>', '', line)
-                blocks.append({'block_type': 2, 'heading2': {'elements': [{'text_run': {'content': text}}]}})
-            elif line.startswith('<h3>'):
-                text = re.sub(r'<h3>|</h3>', '', line)
-                blocks.append({'block_type': 3, 'heading3': {'elements': [{'text_run': {'content': text}}]}})
-            # 表格开始/结束
-            elif line.startswith('<table>'):
-                continue
-            elif line.startswith('</table>'):
-                continue
-            elif line.startswith('<tr>'):
-                continue
-            elif line.startswith('</tr>'):
-                continue
-            elif line.startswith('<th>'):
-                continue
-            elif line.startswith('<td>'):
-                continue
-            # 其他行作为普通文本
-            elif line.startswith('<p>'):
-                text = re.sub(r'<p>|</p>', '', line)
-                text = re.sub(r'<[^>]+>', '', text)  # 去除其他标签
-                if text.strip():
-                    blocks.append({'block_type': 4, 'text': {'elements': [{'text_run': {'content': text}}]}})
-            elif line.startswith('<callout'):
-                # 提取 callout 内容
-                text = re.sub(r'<callout[^>]*>|</callout>', '', line)
-                text = re.sub(r'<[^>]+>', '', text)
-                if text.strip():
-                    blocks.append({'block_type': 4, 'text': {'elements': [{'text_run': {'content': text}}]}})
-            else:
-                # 普通文本，去除所有标签
-                text = re.sub(r'<[^>]+>', '', line)
-                if text.strip():
-                    blocks.append({'block_type': 4, 'text': {'elements': [{'text_run': {'content': text}}]}})
-
-        return blocks
+        return doc_id, doc_url
 
     def build_feishu_card(self, doc_url: str = None) -> dict:
         """构建飞书卡片消息 - 按知行信号分类"""
