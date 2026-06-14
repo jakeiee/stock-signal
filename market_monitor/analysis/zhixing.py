@@ -189,6 +189,90 @@ def fetch_etf_history(
         return None
 
 
+def fetch_index_history_xalpha(
+    xa_code: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[pd.DataFrame]:
+    """
+    通过 xalpha 获取指数历史数据（替代 ETF 历史数据，数据更完整）。
+    
+    xalpha 指数代码格式：
+        A股中证: ZZ930601
+        港股: HKHSTECH, HKHSIII
+        深证: SZ399673
+        上证: SH000688
+        国证: GZ987018
+    
+    Args:
+        xa_code: xalpha 指数代码
+        start_date: 开始日期 "YYYYMMDD" 或 "YYYY-MM-DD"
+        end_date: 结束日期
+    
+    Returns:
+        DataFrame，包含 date/open/high/low/close/volume 字段
+        与 fetch_etf_history 返回格式一致，可直接用于知行指标计算
+    """
+    try:
+        import xalpha as xa
+        
+        # 设置默认日期范围（2年）
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y%m%d")
+        if start_date is None:
+            start = datetime.now() - timedelta(days=730)
+            start_date = start.strftime("%Y%m%d")
+        
+        # 创建指数对象并获取价格数据
+        info = xa.indexinfo(code=xa_code)
+        df = info.price
+        
+        if df is None or df.empty:
+            return None
+        
+        # 标准化列名：xalpha 返回 date/open/close/high/low/volume/percent/...
+        # 已经是标准格式，只需过滤日期范围并确保列名一致
+        df = df.copy()
+        
+        # 确保 date 列是 datetime 类型
+        if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+            df["date"] = pd.to_datetime(df["date"])
+        
+        # 过滤日期范围
+        start_dt = pd.to_datetime(start_date.replace("-", "")[:8])
+        end_dt = pd.to_datetime(end_date.replace("-", "")[:8])
+        df = df[(df["date"] >= start_dt) & (df["date"] <= end_dt)]
+        
+        if df.empty:
+            return None
+        
+        # 只保留需要的列
+        needed_cols = ["date", "open", "high", "low", "close"]
+        for col in needed_cols:
+            if col not in df.columns:
+                df[col] = np.nan
+        
+        if "volume" in df.columns:
+            needed_cols.append("volume")
+        
+        df = df[needed_cols].sort_values("date").reset_index(drop=True)
+        
+        # 修复缺失的 OHLC 数据（新浪回退源可能只提供 close）
+        # 用 close 填充缺失的 open/high/low，使 KDJ 计算可用（结果为中性 K=50 D=50 J=50）
+        for col in ["open", "high", "low"]:
+            if df[col].isna().all() or df[col].isna().sum() > len(df) * 0.5:
+                df[col] = df["close"]
+        
+        return df
+    
+    except ImportError:
+        print("[知行趋势线] xalpha 未安装，请执行: pip install xalpha")
+        return None
+    except Exception as e:
+        print(f"[知行趋势线] 获取指数 {xa_code} 历史数据失败: {e}")
+        return None
+
+
 # ── 知行趋势线计算 ─────────────────────────────────────────────────────────────
 
 def calculate_short_trend(close: pd.Series, period: int = SHORT_EMA_PERIOD) -> pd.Series:

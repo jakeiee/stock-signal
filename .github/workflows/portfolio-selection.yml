@@ -1,15 +1,16 @@
-name: 持仓分析报告
+name: 选股持仓分析报告
 
 on:
   schedule:
-    - cron: '30 2 * * 1-5'    # 工作日北京时间 10:30 (UTC 02:30) - 持仓分析
+    # 工作日北京时间 16:00 (UTC 08:00) - 收盘后选股分析
+    - cron: '0 8 * * 1-5'
   workflow_dispatch:             # 支持手动触发
 
 jobs:
-  report:
+  selection:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: LARK_APP  # 指定使用 Environment secrets
+    timeout-minutes: 20
+    environment: LARK_APP  # 使用 Environment secrets
     
     env:
       FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
@@ -31,27 +32,25 @@ jobs:
           pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
           pip install xalpha pandas numpy requests tushare akshare
 
-      - name: 配置Python环境变量
+      - name: 配置环境变量
         run: |
-          # 创建 .env 文件供 Python 脚本使用
           cat > .env << EOF
           TUSHARE_TOKEN=${TUSHARE_TOKEN}
           FEISHU_WEBHOOK=${FEISHU_WEBHOOK}
           EOF
           echo "环境变量文件已创建"
 
-      - name: 执行持仓分析 + 选股推荐 + 飞书推送
+      - name: 执行选股分析 + 飞书推送
         run: |
-          echo "检查环境变量..."
+          echo "=== 选股持仓管理系统 ==="
           echo "FEISHU_APP_ID 是否存在: $(if [ -n "$FEISHU_APP_ID" ]; then echo "yes (长度:${#FEISHU_APP_ID})"; else echo "no"; fi)"
-          echo "FEISHU_APP_SECRET 是否存在: $(if [ -n "$FEISHU_APP_SECRET" ]; then echo "yes (长度:${#FEISHU_APP_SECRET})"; else echo "no"; fi)"
           echo "FEISHU_WEBHOOK 是否存在: $(if [ -n "$FEISHU_WEBHOOK" ]; then echo "yes"; else echo "no"; fi)"
-          # 执行报告生成（含选股推荐 + 飞书文档 + 飞书卡片消息）
-          python -m market_monitor.report.portfolio_professional --feishu --selection
+          # 执行选股流程并推送到飞书
+          python -m market_monitor.portfolio_selection_workflow --feishu
 
       - name: 上传报告
         uses: actions/upload-artifact@v4
         with:
-          name: portfolio-report-${{ github.run_number }}
+          name: selection-report-${{ github.run_number }}
           path: portfolio_report_*.md
           retention-days: 30

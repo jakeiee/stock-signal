@@ -311,16 +311,17 @@ def quick_screen(strategy: str = "kdj_oversold") -> Dict:
     
     Args:
         strategy: 策略名称
-            - "kdj_oversold": KDJ超卖策略
+            - "kdj_oversold": KDJ超卖策略（含行业主题/宽基/风格/外盘/黄金）
             - "golden_cross": 金叉策略
             - "bullish_breakout": 多头突破策略
+            - "selection": 选股专用策略（全ETF类型初筛，不做趋势过滤）
     
     Returns:
         筛选结果
     """
     strategies = {
         "kdj_oversold": {
-            "etf_types": ["行业主题", "宽基指数", "风格策略"],
+            "etf_types": ["行业主题", "宽基指数", "风格策略", "外盘ETF", "黄金ETF"],
             "scale_min": 5000,
             "kdj_value": 0,
             "trend": {
@@ -347,6 +348,12 @@ def quick_screen(strategy: str = "kdj_oversold") -> Dict:
                 "position": ["多头排列"],
             },
         },
+        "selection": {
+            "etf_types": ["行业主题", "宽基指数", "风格策略", "外盘ETF", "黄金ETF"],
+            "scale_min": 5000,
+            "kdj_value": 0,
+            "trend": {},  # 不做趋势过滤，由编排器自行处理
+        },
     }
     
     config = strategies.get(strategy, strategies["kdj_oversold"])
@@ -357,7 +364,10 @@ def quick_screen(strategy: str = "kdj_oversold") -> Dict:
         scale_min=config.get("scale_min"),
         kdj=config.get("kdj_value"),
     )
-    selector.set_trend_filter(**config.get("trend", {}))
+    
+    trend_config = config.get("trend", {})
+    if trend_config:
+        selector.set_trend_filter(**trend_config)
     
     return selector.execute()
 

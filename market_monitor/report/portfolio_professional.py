@@ -359,7 +359,7 @@ class ProfessionalETFReportGenerator:
     PM_STYLE_MARKET = "market"      # 市场明细
     PM_STYLE_ACTION = "action"      # 行动聚焦（默认）
 
-    def __init__(self, results: List[Dict], pm_style: str = None):
+    def __init__(self, results: List[Dict], pm_style: str = None, enable_selection: bool = False):
         self.results = results
         beijing_tz = timezone(timedelta(hours=8))
         self.now = datetime.now(beijing_tz)
@@ -367,6 +367,9 @@ class ProfessionalETFReportGenerator:
         self.report_date = self.now.strftime("%Y-%m-%d")
         # 仓位展示样式，默认使用行动聚焦
         self.pm_style = pm_style or self.PM_STYLE_ACTION
+        # 是否启用选股推荐模块
+        self.enable_selection = enable_selection
+        self._selection_cache = None  # 缓存选股结果，避免重复计算
 
     def _escape(self, text: str) -> str:
         """转义XML特殊字符"""
@@ -678,6 +681,135 @@ class ProfessionalETFReportGenerator:
             import traceback
             traceback.print_exc()
             return {"error": str(e)}
+
+    def _generate_selection_section(self) -> str:
+        """
+        选股推荐模块 - 运行ETF筛选流水线并生成XML内容。
+        
+        仅展示初筛结果和前10只候选标的，完整分析存入本地文件。
+        """
+        if not self.enable_selection:
+            return ""
+        
+        if self._selection_cache is not None:
+            return self._selection_cache
+        
+        print("\n  🔍 [选股模块] 运行ETF筛选流水线...")
+        section_parts = []
+        
+        try:
+            from market_monitor.data_sources.etf_selector import get_selection_etfs
+            from market_monitor.analysis.zhixing import fetch_index_history_xalpha, get_trend_status, comprehensive_score
+            from market_monitor.portfolio_selection_workflow import ETF_INDEX_TO_XACODE
+            
+            # Phase 1: 初筛
+            result1 = get_selection_etfs(scale_min=5000)
+            total_count = result1.get("total", 0)
+            etfs = result1.get("etfs", [])
+            
+            # 排除已持仓的ETF
+            held_codes = {r.get('etf_code', '') for r in self.results}
+            new_etfs = [e for e in etfs if e['code'] not in held_codes]
+            
+            # Phase 2: 知行分析（前10只新ETF）
+            analyses = []
+            for etf in new_etfs[:10]:
+                track = etf.get('track_target', '')
+                xa_code = ETF_INDEX_TO_XACODE.get(track)
+                if not xa_code:
+                    continue
+                
+                df = fetch_index_history_xalpha(xa_code)
+                if df is None or df.empty or len(df) < 20:
+                    continue
+                
+                a = get_trend_status(df)
+                if 'error' in a:
+                    continue
+                
+                score = comprehensive_score(df)
+                a.update(score)
+                a['code'] = etf['code']
+                a['name'] = etf['name']
+                a['etf_type'] = etf.get('type', '')
+                a['price'] = etf.get('price', 0)
+                a['premium'] = etf.get('premium', 0)
+                a['scale'] = etf.get('scale', 0)
+                a['kdj_j'] = a.get('kdj_j', etf.get('kdj_value', 0))
+                a['track_target'] = track
+                analyses.append(a)
+            
+            # 统计
+            signal_map = {'BUY': '🟢金叉买入', 'HOLD_BULL': '🟡多头持有', 
+                         'HOLD_NEUTRAL': '⚪中性', 'HOLD_BEAR': '🔴空头'}
+            signal_count = {}
+            for a in analyses:
+                s = a.get('signal', '?')
+                signal_count[s] = signal_count.get(s, 0) + 1
+            
+            # 买入候选
+            buy_candidates = [a for a in analyses if a.get('signal') == 'BUY' and a.get('total_score', 0) >= 40]
+            watch_candidates = [a for a in analyses if a.get('signal') == 'HOLD_BULL' and a.get('total_score', 0) >= 40]
+            high_score = sorted([a for a in analyses if a.get('total_score', 0) >= 30],
+                               key=lambda x: x.get('total_score', 0), reverse=True)[:5]
+            
+            # 构建XML
+            section_parts.append(f'<h1>六、选股推荐</h1>')
+            section_parts.append(f'<p>筛选条件：KDJ&lt;0, 规模&gt;5000万, 5大类ETF</p>')
+            section_parts.append(f'<p>初筛：<b>{total_count}</b> 只 → 新建仓候选（去重）：<b>{len(new_etfs)}</b> 只 → 知行分析：<b>{len(analyses)}</b> 只</p>')
+            
+            # 信号分布
+            section_parts.append('<h2>信号分布</h2>')
+            section_parts.append('<table><thead><tr><th>信号</th><th>数量</th></tr></thead><tbody>')
+            for s, label in [('BUY','🟢金叉买入'), ('HOLD_BULL','🟡多头持有'), 
+                            ('HOLD_NEUTRAL','⚪中性'), ('HOLD_BEAR','🔴空头')]:
+                cnt = signal_count.get(s, 0)
+                if cnt > 0:
+                    section_parts.append(f'<tr><td>{label}</td><td>{cnt} 只</td></tr>')
+            section_parts.append('</tbody></table>')
+            
+            # 买入推荐
+            if buy_candidates:
+                section_parts.append('<h2>🟢 买入推荐（金叉 + 评分≥40）</h2>')
+                section_parts.append('<table><thead><tr><th>代码</th><th>名称</th><th>类型</th><th>评分</th><th>KDJ_J</th><th>溢价%</th></tr></thead><tbody>')
+                for b in buy_candidates:
+                    section_parts.append(
+                        f'<tr><td>{b["code"]}</td><td>{self._escape(b["name"])}</td>'
+                        f'<td>{b.get("etf_type","")}</td><td><b>{b.get("total_score",0):.0f}</b></td>'
+                        f'<td>{b.get("kdj_j",0):.1f}</td><td>{b.get("premium",0):.2f}%</td></tr>')
+                section_parts.append('</tbody></table>')
+            
+            if watch_candidates:
+                section_parts.append('<h2>🟡 关注列表（多头持有 + 评分≥40）</h2>')
+                section_parts.append('<table><thead><tr><th>代码</th><th>名称</th><th>类型</th><th>评分</th><th>KDJ_J</th></tr></thead><tbody>')
+                for w in watch_candidates:
+                    section_parts.append(
+                        f'<tr><td>{w["code"]}</td><td>{self._escape(w["name"])}</td>'
+                        f'<td>{w.get("etf_type","")}</td><td><b>{w.get("total_score",0):.0f}</b></td>'
+                        f'<td>{w.get("kdj_j",0):.1f}</td></tr>')
+                section_parts.append('</tbody></table>')
+            
+            # 高评分候选（评分≥30）
+            if high_score and not buy_candidates:
+                section_parts.append('<h2>📊 高评分候选（评分≥30，待观察）</h2>')
+                section_parts.append('<table><thead><tr><th>代码</th><th>名称</th><th>类型</th><th>评分</th><th>信号</th><th>KDJ_J</th></tr></thead><tbody>')
+                for h in high_score:
+                    sig = signal_map.get(h.get('signal',''), h.get('signal',''))
+                    section_parts.append(
+                        f'<tr><td>{h["code"]}</td><td>{self._escape(h["name"])}</td>'
+                        f'<td>{h.get("etf_type","")}</td><td><b>{h.get("total_score",0):.0f}</b></td>'
+                        f'<td>{sig}</td><td>{h.get("kdj_j",0):.1f}</td></tr>')
+                section_parts.append('</tbody></table>')
+            
+            result = "\n".join(section_parts)
+            print(f"  ✅ 选股分析完成: {len(analyses)} 只候选")
+            
+        except Exception as e:
+            print(f"  ⚠ 选股模块运行失败: {e}")
+            result = f'<p>⚠ 选股模块运行异常: {self._escape(str(e))}</p>'
+        
+        self._selection_cache = result
+        return result
 
     def _build_pm_xml_block(self, pm_result: dict, style: str = "market") -> str:
         """
@@ -1066,6 +1198,9 @@ class ProfessionalETFReportGenerator:
         pm_result = self._calculate_position_manager()
         pm_block = self._build_pm_xml_block(pm_result, style=self.pm_style)
 
+        # 选股推荐（可选）
+        selection_section = self._generate_selection_section()
+
         # 生成XML
         xml = f"""<title>ETF持仓分析报告 {self.report_date}</title>
 
@@ -1113,6 +1248,7 @@ class ProfessionalETFReportGenerator:
 <h1>四、风险提示</h1>
 <p>{risk_content}</p>
 {pm_block}
+{selection_section}
 
 <callout emoji="⚠️" background-color="light-yellow" border-color="yellow">
   <p>本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。</p>
@@ -1332,6 +1468,8 @@ def main():
     parser = argparse.ArgumentParser(description="ETF持仓专业分析报告")
     parser.add_argument("--feishu", "-f", action="store_true", help="发送飞书消息")
     parser.add_argument("--positions", "-p", default="market_monitor/positions.json", help="持仓文件路径")
+    parser.add_argument("--selection", "-S", action="store_true", 
+                        help="启用选股推荐模块（嵌入选股候选到持仓报告中）")
     parser.add_argument("--pm-style", "-s", 
                         choices=["compact", "market", "action", "all"],
                         default="action",
@@ -1421,7 +1559,7 @@ def main():
     pm_style = args.pm_style if args.pm_style != "all" else ProfessionalETFReportGenerator.PM_STYLE_ACTION
 
     # 生成专业版报告
-    generator = ProfessionalETFReportGenerator(results, pm_style=pm_style)
+    generator = ProfessionalETFReportGenerator(results, pm_style=pm_style, enable_selection=args.selection)
     
     # 如果选择 all 样式，生成多个版本的报告
     if args.pm_style == "all":
