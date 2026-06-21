@@ -789,6 +789,22 @@ class ProfessionalETFReportGenerator:
                         f'<td>{w.get("kdj_j",0):.1f}</td></tr>')
                 section_parts.append('</tbody></table>')
             
+            # 知行分析明细（始终展示，方便查看所有候选ETF的具体指标）
+            if analyses:
+                section_parts.append('<h2>📊 知行分析明细</h2>')
+                section_parts.append('<table><thead><tr><th>代码</th><th>名称</th><th>类型</th><th>评分</th><th>信号</th><th>排列</th><th>KDJ_J</th></tr></thead><tbody>')
+                sorted_analyses = sorted(analyses, key=lambda x: x.get('total_score', 0), reverse=True)
+                for a in sorted_analyses:
+                    sig = a.get('signal', '')
+                    sig_emoji = {'BUY': '🟢', 'HOLD_BULL': '🟡', 'HOLD_NEUTRAL': '⚪', 'HOLD_BEAR': '🔴'}.get(sig, '⚪')
+                    section_parts.append(
+                        f'<tr><td>{a["code"]}</td><td>{self._escape(a["name"])}</td>'
+                        f'<td>{a.get("etf_type","")}</td><td>{a.get("total_score",0):.0f}</td>'
+                        f'<td>{sig_emoji} {sig}</td><td>{a.get("position","")}</td>'
+                        f'<td>{a.get("kdj_j",0):.1f}</td></tr>')
+                section_parts.append('</tbody></table>')
+                section_parts.append('</tbody></table>')
+            
             # 高评分候选（评分≥30）
             if high_score and not buy_candidates:
                 section_parts.append('<h2>📊 高评分候选（评分≥30，待观察）</h2>')

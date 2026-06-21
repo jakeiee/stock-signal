@@ -492,7 +492,29 @@ def phase5_generate_report(
     lines.append("| 20% | 🛑 完全离场 | 清仓 |")
     lines.append("")
     
-    # ── 全部分析结果 ──
+    # ── 全部分析结果明细 ──
+    # 始终展示所有进入知行分析的ETF明细，方便查看每只ETF的具体信号和指标
+    if zhixing_results:
+        lines.append("## 📊 知行分析明细")
+        lines.append("")
+        lines.append("| 代码 | 名称 | 类型 | 评分 | 信号 | 排列 | KDJ_J | KDJ_K | KDJ_D | 趋势差值% |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+        # 按评分降序排列
+        sorted_all = sorted(zhixing_results, key=lambda x: x.get("total_score", 0), reverse=True)
+        for a in sorted_all[:30]:
+            signal_icon = {"BUY": "🟢", "HOLD_BULL": "🟡", "HOLD_NEUTRAL": "⚪", "HOLD_BEAR": "🔴", "SELL": "🛑"}.get(a.get("signal", ""), "⚪")
+            lines.append(
+                f"| {a.get('code','')} | {a.get('name','')} | {a.get('etf_type','')} | "
+                f"{a.get('total_score',0):.0f} | {signal_icon} {a.get('signal','')} | "
+                f"{a.get('position','')} | {a.get('kdj_j',0):.1f} | "
+                f"{a.get('kdj_k',0):.1f} | {a.get('kdj_d',0):.1f} | "
+                f"{a.get('trend_diff_pct',0):.1f}% |"
+            )
+        if len(zhixing_results) > 30:
+            lines.append(f"| ... | 还有 {len(zhixing_results) - 30} 只 | ... |")
+        lines.append("")
+    
+    # ── 全部分析结果（仅达标） ──
     all_candidates = filter_result.get("all_candidates", [])
     if all_candidates:
         lines.append("## 📊 全部达标标的（按评分排序）")
