@@ -45,8 +45,8 @@ jobs:
           echo "=== 选股持仓管理系统 ==="
           echo "FEISHU_APP_ID 是否存在: $(if [ -n "$FEISHU_APP_ID" ]; then echo "yes (长度:${#FEISHU_APP_ID})"; else echo "no"; fi)"
           echo "FEISHU_WEBHOOK 是否存在: $(if [ -n "$FEISHU_WEBHOOK" ]; then echo "yes"; else echo "no"; fi)"
-          # 执行选股流程并推送到飞书
-          python -m market_monitor.portfolio_selection_workflow --feishu
+          # 执行选股流程并推送到飞书（最多分析50只）
+          python -m market_monitor.portfolio_selection_workflow --feishu --max 50
 
       - name: 上传报告
         uses: actions/upload-artifact@v4

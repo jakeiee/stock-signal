@@ -59,8 +59,8 @@ SELECTION_KDJ_MAX = 0
 # 综合评分买入阈值
 BUY_SCORE_THRESHOLD = 40
 
-# 最多分析ETF数量
-MAX_ANALYZE_COUNT = 30
+# 最多分析ETF数量（每只间隔1~2s，50只约需2~3分钟）
+MAX_ANALYZE_COUNT = 50
 
 # ── ETF 跟踪指数 → xalpha 指数代码映射 ──────────────────────────────────────────
 # 键：东方财富选股API返回的 INDEX_NAME_ABBR（跟踪标的简称）
