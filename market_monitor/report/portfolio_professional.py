@@ -803,7 +803,6 @@ class ProfessionalETFReportGenerator:
                         f'<td>{sig_emoji} {sig}</td><td>{a.get("position","")}</td>'
                         f'<td>{a.get("kdj_j",0):.1f}</td></tr>')
                 section_parts.append('</tbody></table>')
-                section_parts.append('</tbody></table>')
             
             # 高评分候选（评分≥30）
             if high_score and not buy_candidates:
@@ -816,6 +815,10 @@ class ProfessionalETFReportGenerator:
                         f'<td>{h.get("etf_type","")}</td><td><b>{h.get("total_score",0):.0f}</b></td>'
                         f'<td>{sig}</td><td>{h.get("kdj_j",0):.1f}</td></tr>')
                 section_parts.append('</tbody></table>')
+            
+            # 无买入候选时的提示
+            if not buy_candidates and not watch_candidates:
+                section_parts.append('<p>⚠️ 当前无评分≥40的达标标的，详见上方知行分析明细表。</p>')
             
             result = "\n".join(section_parts)
             print(f"  ✅ 选股分析完成: {len(analyses)} 只候选")

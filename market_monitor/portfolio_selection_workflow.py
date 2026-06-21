@@ -531,6 +531,9 @@ def phase5_generate_report(
                 f"{a.get('trend_diff_pct',0):.1f}% |"
             )
         lines.append("")
+    else:
+        lines.append("> ⚠️ 当前无评分≥40的达标标的。可通过降低评分阈值或等待行情回暖来获取更多候选。")
+        lines.append("")
     
     # ── 风险提示 ──
     lines.append("## ⚠️ 风险提示")
