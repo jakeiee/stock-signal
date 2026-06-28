@@ -1093,8 +1093,9 @@ class ProfessionalETFReportGenerator:
                 lines.append(f"{icon} **{m['name']}**: {m['current_w']:.0f}%→{m['target_w']:.0f}% ({m['diff']:+.0f}%) {action_text}")
             return "\n".join(lines)
 
-    def generate(self) -> str:
+    def generate(self, llm_text: str = None) -> str:
         """生成完整报告"""
+        self._llm_text = llm_text  # 缓存供子方法使用
         total = len(self.results)
         avg_score = sum(r.get('pattern_score', 0) for r in self.results) / total if total else 0
 
@@ -1171,17 +1172,14 @@ class ProfessionalETFReportGenerator:
         
         risk_content = "；".join(risk_items) if risk_items else "风险整体可控"
 
-        # 操作建议
+        # 操作建议（含具体动作）
         advice_items = []
-        if buy_list:
-            buy_names = "、".join([r.get('index_name', '')[:6] for r in buy_list[:3]])
-            advice_items.append(f"金叉买入：{buy_names}")
-        if bull_list:
-            bull_names = "、".join([r.get('index_name', '')[:6] for r in bull_list[:2]])
-            advice_items.append(f"多头持有：{bull_names}")
-        if bear_list:
-            bear_names = "、".join([r.get('index_name', '')[:6] for r in bear_list[:3]])
-            advice_items.append(f"空头排列：{bear_names}")
+        for r in sorted_results:
+            name = r.get('etf_name', r.get('index_name', '')[:15])
+            action = self._get_action(r)
+            sig = r.get('signal', '')
+            sig_emoji = {"BUY": "🟢", "HOLD_BULL": "🟡", "HOLD_NEUTRAL": "⚪", "HOLD_BEAR": "🔴", "SELL": "🛑"}.get(sig, "⚪")
+            advice_items.append(f"{sig_emoji} {name}：{action}")
         
         advice_content = "<ul>" + "".join([f"<li>{item}</li>" for item in advice_items]) + "</ul>" if advice_items else "<p>暂无明确操作建议</p>"
 
@@ -1260,6 +1258,9 @@ class ProfessionalETFReportGenerator:
   <p>本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。</p>
 </callout>
 
+<h1>八、AI 解读</h1>
+<p>{self._escape(self._llm_text) if self._llm_text else "（未启用 AI 解读，使用 --llm 参数启用）"}</p>
+
 <p>报告时间：{self.report_time} 北京时间</p>"""
 
         # 异步保存快照到 SQLite（不阻塞报告生成）
@@ -1298,7 +1299,7 @@ class ProfessionalETFReportGenerator:
         """创建飞书文档 - 使用 lark-cli XML 格式（原生支持表格/标题/粗体）"""
         print(f"📄 正在创建飞书文档...")
         
-        content_xml = self.generate()
+        content_xml = self.generate(llm_text=getattr(self, '_llm_text', None))
         
         try:
             # 通过 stdin 传入 XML 内容（避免命令行参数长度限制）
@@ -1356,7 +1357,7 @@ class ProfessionalETFReportGenerator:
         doc_url = f"https://my.feishu.cn/docx/{doc_id}"
         
         # 用结构化 blocks 写入
-        content_xml = self.generate()
+        content_xml = self.generate(llm_text=getattr(self, '_llm_text', None))
         blocks = self._build_doc_blocks(content_xml)
         
         batch_size = 50
@@ -1898,12 +1899,22 @@ def main():
         print("   例如: python3 -m market_monitor.report.portfolio_professional -s action")
         return
     
+    # LLM 解读（先于文档创建，以便嵌入报告）
+    llm_text = None
+    if args.llm and results:
+        print("\n💡 生成 LLM 自然语言解读...")
+        from market_monitor.report.llm_interpreter import generate_interpretation
+        llm_text = generate_interpretation(results, date=generator.report_date)
+        if llm_text:
+            print(f"   ✅ LLM 解读生成成功 ({len(llm_text)} 字符)")
+        else:
+            print("  ⚠ LLM 解读生成失败")
+
     doc_id, doc_url = generator.create_doc()
 
     if doc_url:
         print(f"\n📄 专业版报告已创建: {doc_url}")
     else:
-        # 输出XML内容供调试
         print("\n⚠ 文档创建失败，以下是报告内容预览:")
         print("-" * 60)
         print(generator.generate()[:2000])
@@ -1913,21 +1924,6 @@ def main():
     if args.feishu:
         print()
         generator.send_to_feishu(doc_url)
-
-    # LLM 解读（可选）
-    if args.llm and results:
-        print("\n💡 生成 LLM 自然语言解读...")
-        from market_monitor.report.llm_interpreter import generate_interpretation
-        interpretation = generate_interpretation(results, date=generator.report_date)
-        if interpretation:
-            print(interpretation[:500])
-            # 保存解读到文件
-            interp_path = f"llm_interpretation_{generator.report_date}.md"
-            with open(interp_path, 'w') as f:
-                f.write(interpretation)
-            print(f"  已保存至 {interp_path}")
-        else:
-            print("  ⚠ LLM 解读生成失败（可能未配置 CODEBUDDY_API_KEY）")
 
     print(f"\n{'='*60}\n")
 

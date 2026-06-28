@@ -112,33 +112,27 @@ def generate_interpretation(
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")
     
-    # 获取 API Key
+    # 获取 API Key（可选：CI 环境通过环境变量注入，本地通过 codebuddy /login 存储凭证）
     api_key = os.getenv("CODEBUDDY_API_KEY", "")
-    if not api_key:
-        print("  ⚠ CODEBUDDY_API_KEY 未设置，跳过 LLM 解读")
-        return None
+    api_key_disabled = os.getenv("CODEBUDDY_API_KEY_DISABLED", "")
     
     prompt = _build_prompt(results, selection_data, date)
     
     try:
-        # 写入临时文件（避免命令行参数过长）
-        temp_path = os.path.join(_REPO_ROOT, ".llm_prompt_temp.txt")
-        with open(temp_path, 'w') as f:
-            f.write(prompt)
+        # 构建环境变量
+        env = os.environ.copy()
+        if api_key and not api_key_disabled:
+            env["CODEBUDDY_API_KEY"] = api_key
+        elif "CODEBUDDY_API_KEY" in env:
+            del env["CODEBUDDY_API_KEY"]  # 移除无效 key，使用本地存储凭证
         
         result = subprocess.run(
             ["codebuddy", "--permission-mode", "bypassPermissions", "-p", prompt],
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
-            env={**os.environ, "CODEBUDDY_API_KEY": api_key},
+            env=env,
         )
-        
-        # 清理临时文件
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
         
         if result.returncode != 0:
             print(f"  ⚠ LLM 解读生成失败: {result.stderr[:100]}")
