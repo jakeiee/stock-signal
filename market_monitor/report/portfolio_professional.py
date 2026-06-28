@@ -17,8 +17,28 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+# 加载 .env 文件（确保 CODEBUDDY_API_KEY 等变量可用）
+def _load_env():
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+    if not os.path.exists(env_path):
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_path)
+    except ImportError:
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, _, value = line.partition('=')
+                    key, value = key.strip(), value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+_load_env()
+
 import json
 import subprocess
+import re
 import numpy as np
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List
@@ -1275,9 +1295,8 @@ class ProfessionalETFReportGenerator:
         return None
 
     def create_doc(self) -> tuple:
-        """创建飞书文档 - 使用 OpenAPI"""
+        """创建飞书文档 - 使用 OpenAPI Block 格式（支持标题/表格/粗体/分隔线）"""
         import requests
-        import re
 
         print(f"📄 正在创建飞书文档...")
         token = self._get_feishu_token()
@@ -1294,50 +1313,288 @@ class ProfessionalETFReportGenerator:
             timeout=10
         )
         create_data = create_resp.json()
-        print(f"   创建文档响应: {create_data}")
-
         if create_data.get('code') != 0:
             print(f"   创建文档失败: {create_data}")
             return None, None
 
-        doc_data = create_data.get('data', {}).get('document', {})
-        doc_id = doc_data.get('document_id', '')
+        doc_id = create_data.get('data', {}).get('document', {}).get('document_id', '')
         doc_url = f"https://my.feishu.cn/docx/{doc_id}"
 
-        # 2. 写入纯文本内容（用 text block）
+        # 2. 构建结构化 Blocks
         content_xml = self.generate()
-        plain_text = re.sub(r'<[^>]+>', '', content_xml)
-        plain_text = re.sub(r'\n{3,}', '\n\n', plain_text).strip()
+        blocks = self._build_doc_blocks(content_xml)
 
-        # 拆分为段落
-        paragraphs = [p.strip() for p in plain_text.split('\n\n') if p.strip()]
+        # 3. 分批写入（每批最多50个block，避免请求过大）
+        batch_size = 50
+        all_ok = True
+        for i in range(0, len(blocks), batch_size):
+            batch = blocks[i:i + batch_size]
+            write_resp = requests.post(
+                f'https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children',
+                headers=headers,
+                json={'children': batch, 'index': -1},
+                timeout=30
+            )
+            wd = write_resp.json()
+            if wd.get('code') != 0:
+                print(f"   写入第{i//batch_size + 1}批失败: {wd}")
+                all_ok = False
+                break
 
-        # 飞书文档 block 格式：text block
-        blocks = []
-        for para in paragraphs[:200]:  # 限制最多200段
-            blocks.append({
-                'block_type': 2,  # 2 = text block
-                'text': {
-                    'elements': [{'text_run': {'content': para}}],
-                    'style': {}
-                }
-            })
-
-        write_resp = requests.post(
-            f'https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children',
-            headers=headers,
-            json={'children': blocks, 'index': 0},
-            timeout=30
-        )
-        write_data = write_resp.json()
-        print(f"   写入内容响应: code={write_data.get('code')}, msg={write_data.get('msg', '')}")
-
-        if write_data.get('code') == 0:
-            print(f"   文档创建成功: {doc_url}")
+        if all_ok:
+            print(f"   文档创建成功: {doc_url}  （{len(blocks)} 个块）")
         else:
-            print(f"   写入内容失败，但文档已创建: {doc_url}")
+            print(f"   部分写入失败，但文档已创建: {doc_url}")
 
         return doc_id, doc_url
+
+    # ── Block 构建方法 ────────────────────────────────────────────────────────
+    
+    @staticmethod
+    def _make_text_block(content: str, bold: bool = False) -> dict:
+        """创建普通文本块。"""
+        style = {'bold': bold} if bold else {}
+        return {
+            'block_type': 2,
+            'text': {
+                'elements': [{'text_run': {'content': content, 'text_element_style': style}}],
+                'style': {}
+            }
+        }
+    
+    @staticmethod
+    def _make_heading_block(level: int, content: str) -> dict:
+        """创建标题块 (level 1-9)。block_type: 3=H1, 4=H2, ... 11=H9"""
+        return {
+            'block_type': min(2 + level, 11),
+            f'heading{min(level, 9)}': {
+                'elements': [{'text_run': {'content': content}}],
+                'style': {}
+            }
+        } if level <= 9 else ProfessionalETFReportGenerator._make_text_block(content)
+    
+    @staticmethod
+    def _make_sep_block() -> dict:
+        """创建分隔文本块（因 divider block_type=31 不支持作为 children）。"""
+        return {'block_type': 2, 'text': {
+            'elements': [{'text_run': {'content': '━━━━━━━━━━━━━━━━━━━━━━━━━━━━'}}],
+            'style': {}
+        }}
+    
+    @classmethod
+    def _make_rich_text_block(cls, parts: list) -> dict:
+        """创建富文本块（支持混合粗体/普通文本）。
+        
+        parts: [("普通文本", False), ("粗体文本", True), ...]
+        """
+        elements = []
+        for text, bold in parts:
+            elements.append({
+                'text_run': {
+                    'content': text,
+                    'text_element_style': {'bold': bold} if bold else {}
+                }
+            })
+        return {'block_type': 2, 'text': {'elements': elements, 'style': {}}}
+
+    @classmethod
+    def _build_simple_table(cls, headers: list, rows: list) -> list:
+        """将表格转换为格式化文本块列表。
+        
+        headers: ["列1", "列2", ...]
+        rows: [["r1c1", "r1c2"], ["r2c1", "r2c2"], ...]
+        """
+        if not headers or not rows:
+            return []
+        
+        ncols = len(headers)
+        
+        # 计算每列宽度
+        col_widths = [len(str(h)) for h in headers]
+        for row in rows:
+            for j, cell in enumerate(row[:ncols]):
+                col_widths[j] = max(col_widths[j], min(len(str(cell)), 20))
+        
+        blocks = []
+        
+        # 表头块（加粗）
+        header_parts = []
+        for i, h in enumerate(headers):
+            if i > 0:
+                header_parts.append(('  ', False))
+            header_parts.append((str(h), True))
+        
+        # 分隔线
+        sep = '─' * (sum(col_widths) + (ncols - 1) * 2)
+        
+        blocks.append({
+            'block_type': 2, 'text': {
+                'elements': [{'text_run': {'content': txt, 'text_element_style': {'bold': bold}}} 
+                           for txt, bold in header_parts],
+                'style': {}
+            }
+        })
+        blocks.append({'block_type': 2, 'text': {
+            'elements': [{'text_run': {'content': sep}}], 'style': {}
+        }})
+        
+        # 数据行（每5行一组）
+        for row in rows:
+            row_parts = []
+            for j in range(ncols):
+                if j > 0:
+                    row_parts.append('  ')
+                c = str(row[j]) if j < len(row) else ''
+                row_parts.append(c[:col_widths[j]*3].ljust(col_widths[j]))
+            blocks.append({'block_type': 2, 'text': {
+                'elements': [{'text_run': {'content': ''.join(row_parts)}}],
+                'style': {}
+            }})
+        
+        return blocks
+    
+    @classmethod
+    def _build_doc_blocks(cls, xml: str) -> list:
+        """将报告XML转换为飞书Docx Block列表。"""
+        blocks = []
+        lines = xml.split('\n')
+        i = 0
+        
+        in_table = False
+        table_lines = []
+        
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # 处理表格
+            if '<table>' in line:
+                in_table = True
+                table_lines = [line]
+                i += 1
+                continue
+            
+            if in_table:
+                table_lines.append(line)
+                if '</table>' in line:
+                    in_table = False
+                    table_text = ' '.join(table_lines)
+                    headers, rows = cls._parse_html_table(table_text)
+                    if headers and rows:
+                        blocks.extend(cls._build_simple_table(headers, rows))
+                    table_lines = []
+                i += 1
+                continue
+            
+            # 处理标题（跳过，飞书文档已有独立标题，不重复添加 H1）
+            title_match = re.match(r'<title>(.*)</title>', line)
+            if title_match:
+                i += 1
+                continue
+            
+            h_match = re.match(r'<h1>(.*)</h1>', line)
+            if h_match:
+                blocks.append(cls._make_sep_block())
+                blocks.append(cls._make_heading_block(2, h_match.group(1).strip()))
+                i += 1
+                continue
+            
+            h2_match = re.match(r'<h2>(.*)</h2>', line)
+            if h2_match:
+                blocks.append(cls._make_heading_block(3, h2_match.group(1).strip()))
+                i += 1
+                continue
+            
+            # 处理列表
+            li_match = re.match(r'<li>(.*)</li>', line)
+            if li_match:
+                text = re.sub(r'<[^>]+>', '', li_match.group(1))
+                blocks.append({'block_type': 2, 'text': {
+                    'elements': [{'text_run': {'content': '• ' + text}}],
+                    'style': {}
+                }})
+                i += 1
+                continue
+            
+            # 处理 callout
+            if '<callout' in line:
+                i += 1
+                callout_text = ''
+                while i < len(lines) and '</callout>' not in lines[i]:
+                    part = re.sub(r'<[^>]+>', '', lines[i]).strip()
+                    if part:
+                        callout_text += part + '\n'
+                    i += 1
+                if callout_text.strip():
+                    blocks.append(cls._make_sep_block())
+                    blocks.append(cls._make_text_block('⚠️ ' + callout_text.strip()))
+                i += 1
+                continue
+            
+            # 处理普通段落
+            p_match = re.match(r'<p>(.*)</p>', line)
+            if p_match:
+                text = cls._parse_inline_text(p_match.group(1))
+                blocks.append(text)
+                i += 1
+                continue
+            
+            # 空行跳过
+            if not line:
+                i += 1
+                continue
+            
+            # 其他：作为普通文本
+            clean = re.sub(r'<[^>]+>', '', line).strip()
+            if clean and not clean.startswith('<'):
+                blocks.append(cls._make_text_block(clean))
+            
+            i += 1
+        
+        # 末尾（XML 中已有免责声明+报告时间，不再重复添加）
+        return blocks
+    
+    @classmethod
+    def _parse_html_table(cls, html_text: str) -> tuple:
+        """解析HTML表格，返回 (headers, rows)。"""
+        # 提取表头
+        headers = []
+        th_match = re.findall(r'<th>(.*?)</th>', html_text, re.DOTALL)
+        for h in th_match:
+            headers.append(re.sub(r'<[^>]+>', '', h).strip())
+        
+        # 提取行
+        rows = []
+        tr_blocks = re.findall(r'<tr>(.*?)</tr>', html_text, re.DOTALL)
+        for tr in tr_blocks:
+            tds = re.findall(r'<td>(.*?)</td>', tr, re.DOTALL)
+            if tds:
+                row = [re.sub(r'<[^>]+>', '', td).strip() for td in tds]
+                if any(row):  # 跳过全空行
+                    rows.append(row)
+        
+        return headers, rows
+    
+    @classmethod
+    def _parse_inline_text(cls, text: str):
+        """解析内联文本（支持 <b>粗体</b> 和 <i>斜体</i>），并解码 HTML 实体。"""
+        # 解码 HTML 实体
+        text = text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+        
+        # 提取所有内联标签
+        parts = []
+        last_end = 0
+        for m in re.finditer(r'<(b|i)>(.*?)</\1>', text):
+            if m.start() > last_end:
+                parts.append((text[last_end:m.start()], False))
+            parts.append((m.group(2), True))  # bold or italic → bold
+            last_end = m.end()
+        if last_end < len(text):
+            parts.append((text[last_end:], False))
+        
+        if not parts:
+            return cls._make_text_block(text)
+        
+        return cls._make_rich_text_block(parts)
 
     def build_feishu_card(self, doc_url: str = None) -> dict:
         """构建飞书卡片消息 - 按五级知行信号分类"""

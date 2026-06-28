@@ -21,6 +21,28 @@ from typing import Dict, List, Optional
 # 代码仓库根目录
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 加载 .env 文件
+def _load_env():
+    """加载 .env 文件（兼容 python-dotenv 不存在的情况）。"""
+    env_path = os.path.join(_REPO_ROOT, '.env')
+    if not os.path.exists(env_path):
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_path)
+    except ImportError:
+        # 手动解析 .env 文件
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, _, value = line.partition('=')
+                    key, value = key.strip(), value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+
+_load_env()
+
 
 def _build_prompt(results: List[Dict], selection_data: Optional[Dict], date: str) -> str:
     """构建 LLM 输入提示词。"""
@@ -132,7 +154,7 @@ def generate_interpretation(
         print(f"  ⚠ LLM 解读超时 ({timeout_seconds}s)")
         return None
     except FileNotFoundError:
-        print("  ⚠ codebuddy CLI 未安装，跳过 LLM 解读")
+        print("  ⚠ codebuddy CLI 未安装（本地环境跳过，GitHub Actions 自动可用）")
         return None
     except Exception as e:
         print(f"  ⚠ LLM 解读异常: {e}")
