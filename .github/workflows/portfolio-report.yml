@@ -16,6 +16,7 @@ jobs:
       FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+      CODEBUDDY_API_KEY: ${{ secrets.CODEBUDDY_API_KEY }}
     
     steps:
       - name: 检出代码

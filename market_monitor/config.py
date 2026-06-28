@@ -46,3 +46,9 @@ LLM_ENABLED = True
 #    2. 在 ~/.zshrc 中添加: export DASHSCOPE_API_KEY="your-key-here"
 #    3. 重启终端或执行: source ~/.zshrc
 # ─────────────────────────────────────────────────────────────
+
+# ============ CodeBuddy CLI 配置 ============
+
+# CodeBuddy CLI API Key（用于自动化脚本中调用 codebuddy 命令）
+CODEBUDDY_API_KEY = os.getenv("CODEBUDDY_API_KEY", "")
+CODEBUDDY_CLI = os.getenv("CODEBUDDY_CLI", "codebuddy")
