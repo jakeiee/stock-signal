@@ -25,6 +25,8 @@ ETF_CODE_MAP: Dict[str, dict] = {
     "513090": {"name": "香港证券ETF易方达",    "index_name": "中证香港证券指数",     "xa_code": "ZZ930709"},
     "562500": {"name": "机器人ETF华夏",        "index_name": "中证机器人指数",       "xa_code": "ZZH30590"},
     "513180": {"name": "恒生科技ETF华夏",      "index_name": "恒生科技指数",         "xa_code": "HKHSTECH"},
+    "512890": {"name": "红利低波ETF华泰柏瑞",   "index_name": "中证红利低波指数",     "xa_code": "ZZ930740"},
+    "560860": {"name": "工业有色ETF",          "index_name": "中证工业有色指数",     "xa_code": "ZZH11059"},
     "506008": {"name": "科创板长城",            "index_name": "科创50指数",           "xa_code": "SH000688"},
     "513130": {"name": "恒生互联网ETF",        "index_name": "恒生互联网科技业指数", "xa_code": "HKHSIII"},
     "159890": {"name": "软件ETF嘉实",          "index_name": "中证软件服务指数",     "xa_code": "ZZ930601"},
