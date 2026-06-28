@@ -963,8 +963,8 @@ class ProfessionalETFReportGenerator:
             xml += """  </tbody>
 </table>
 
-<p><i>* 当前仓位基于持仓市值计算，建议仓位基于模型配置</i></p>
-<p><i>* ⭐ 表示调整幅度较大，建议优先处理</i></p>
+<p><em>* 当前仓位基于持仓市值计算，建议仓位基于模型配置</em></p>
+<p><em>* ⭐ 表示调整幅度较大，建议优先处理</em></p>
 """
             return xml
 
@@ -1295,17 +1295,52 @@ class ProfessionalETFReportGenerator:
         return None
 
     def create_doc(self) -> tuple:
-        """创建飞书文档 - 使用 OpenAPI Block 格式（支持标题/表格/粗体/分隔线）"""
-        import requests
-
+        """创建飞书文档 - 使用 lark-cli XML 格式（原生支持表格/标题/粗体）"""
         print(f"📄 正在创建飞书文档...")
+        
+        content_xml = self.generate()
+        
+        try:
+            # 通过 stdin 传入 XML 内容（避免命令行参数长度限制）
+            result = subprocess.run(
+                ['lark-cli', 'docs', '+create', '--api-version', 'v2',
+                 '--content', '-', '--doc-format', 'xml'],
+                capture_output=True, text=True, timeout=30,
+                input=content_xml,
+                cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            )
+            
+            if result.returncode == 0:
+                try:
+                    data = json.loads(result.stdout.strip())
+                    if data.get('ok'):
+                        doc_info = data.get('data', {}).get('document', {})
+                        doc_id = doc_info.get('document_id', '')
+                        doc_url = doc_info.get('url', '') or f'https://my.feishu.cn/docx/{doc_id}'
+                        print(f"   文档创建成功（表格模式）: {doc_url}")
+                        return doc_id, doc_url
+                except json.JSONDecodeError:
+                    pass
+            
+            print(f"   lark-cli 返回异常: {result.stderr[:200] if result.stderr else result.stdout[:200]}")
+            return self._create_doc_raw()
+        
+        except FileNotFoundError:
+            print("   ⚠ lark-cli 不可用，回退到 REST API")
+            return self._create_doc_raw()
+        except Exception as e:
+            print(f"   lark-cli 异常: {e}")
+            return self._create_doc_raw()
+    
+    def _create_doc_raw(self) -> tuple:
+        """回退方案：使用 REST API 创建纯文本文档（无表格）"""
+        import requests
         token = self._get_feishu_token()
         if not token:
             return None, None
-
+        
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-
-        # 1. 创建空文档
+        
         create_resp = requests.post(
             'https://open.feishu.cn/open-apis/docx/v1/documents',
             headers=headers,
@@ -1316,17 +1351,15 @@ class ProfessionalETFReportGenerator:
         if create_data.get('code') != 0:
             print(f"   创建文档失败: {create_data}")
             return None, None
-
+        
         doc_id = create_data.get('data', {}).get('document', {}).get('document_id', '')
         doc_url = f"https://my.feishu.cn/docx/{doc_id}"
-
-        # 2. 构建结构化 Blocks
+        
+        # 用结构化 blocks 写入
         content_xml = self.generate()
         blocks = self._build_doc_blocks(content_xml)
-
-        # 3. 分批写入（每批最多50个block，避免请求过大）
+        
         batch_size = 50
-        all_ok = True
         for i in range(0, len(blocks), batch_size):
             batch = blocks[i:i + batch_size]
             write_resp = requests.post(
@@ -1338,14 +1371,9 @@ class ProfessionalETFReportGenerator:
             wd = write_resp.json()
             if wd.get('code') != 0:
                 print(f"   写入第{i//batch_size + 1}批失败: {wd}")
-                all_ok = False
-                break
-
-        if all_ok:
-            print(f"   文档创建成功: {doc_url}  （{len(blocks)} 个块）")
-        else:
-            print(f"   部分写入失败，但文档已创建: {doc_url}")
-
+                return doc_id, doc_url
+        
+        print(f"   文档创建成功（纯文本模式）: {doc_url}")
         return doc_id, doc_url
 
     # ── Block 构建方法 ────────────────────────────────────────────────────────
@@ -1576,14 +1604,14 @@ class ProfessionalETFReportGenerator:
     
     @classmethod
     def _parse_inline_text(cls, text: str):
-        """解析内联文本（支持 <b>粗体</b> 和 <i>斜体</i>），并解码 HTML 实体。"""
+        """解析内联文本（支持 <b>粗体</b> 和 <em>斜体</em>），并解码 HTML 实体。"""
         # 解码 HTML 实体
         text = text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
         
         # 提取所有内联标签
         parts = []
         last_end = 0
-        for m in re.finditer(r'<(b|i)>(.*?)</\1>', text):
+        for m in re.finditer(r'<(b|em|i)>(.*?)</\1>', text):
             if m.start() > last_end:
                 parts.append((text[last_end:m.start()], False))
             parts.append((m.group(2), True))  # bold or italic → bold
