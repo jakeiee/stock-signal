@@ -386,6 +386,118 @@ def calculate_zhixing(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    一站式技术指标计算 — 唯一的统一入口。
+    
+    供 portfolio_professional.py 等模块调用，替代其内嵌的 calculate_technical()。
+    整合了知行趋势线、全部均线、KDJ、MACD、RSI、成交量分析、价格位置等所有指标。
+    
+    Args:
+        df: 包含 date/open/high/low/close/volume 的标准化DataFrame
+    
+    Returns:
+        附加了全部技术指标列的DataFrame，字段包括:
+        - 均线: ma5, ma10, ma14, ma20, ma28, ma57, ma60, ma114
+        - 知行趋势线: zx_short, zx_long (等同于 short_trend/long_trend)
+        - KDJ: kdj_k, kdj_d, kdj_j
+        - MACD: macd_diff, macd_dea, macd_hist
+        - RSI: rsi14
+        - 成交量: ma_vol_5, ma_vol_60, vol_ratio, vol_match
+        - 价格位置: price_pos_60d
+        - 偏离比例: close_pct_short, close_pct_long, short_pct_long
+        - 三线位置: line_position (收盘/白线/黄线关系描述)
+        - 均线排列: ma_pattern
+    """
+    if df is None or len(df) < 60:
+        return df
+    
+    result = df.copy()
+    close = result["close"]
+    
+    # ── 均线 ────────────────────────────────────────────────
+    for p in [5, 10, 14, 20, 28, 57, 60, 114]:
+        result[f"ma{p}"] = close.rolling(window=p, min_periods=1).mean()
+    
+    # ── 知行趋势线 ──────────────────────────────────────────
+    ema10 = close.ewm(span=10, adjust=False).mean()
+    result["zx_short"] = ema10.ewm(span=10, adjust=False).mean()
+    result["zx_long"] = (result["ma14"] + result["ma28"] + result["ma57"] + result["ma114"]) / 4
+    
+    # ── KDJ ─────────────────────────────────────────────────
+    low14 = result["low"].rolling(window=9, min_periods=1).min()
+    high14 = result["high"].rolling(window=9, min_periods=1).max()
+    diff = (high14 - low14).replace(0, 0.001)
+    rsv = ((close - low14) / diff * 100).fillna(50)
+    result["kdj_k"] = rsv.ewm(alpha=1/3, adjust=False).mean()
+    result["kdj_d"] = result["kdj_k"].ewm(alpha=1/3, adjust=False).mean()
+    result["kdj_j"] = 3 * result["kdj_k"] - 2 * result["kdj_d"]
+    
+    # ── MACD ─────────────────────────────────────────────────
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    result["macd_diff"] = ema12 - ema26
+    result["macd_dea"] = result["macd_diff"].ewm(span=9, adjust=False).mean()
+    result["macd_hist"] = (result["macd_diff"] - result["macd_dea"]) * 2
+    
+    # ── RSI ──────────────────────────────────────────────────
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = (-delta).where(delta < 0, 0)
+    avg_gain = gain.rolling(window=14, min_periods=1).mean()
+    avg_loss = loss.rolling(window=14, min_periods=1).mean()
+    rs = avg_gain / avg_loss.replace(0, 0.001)
+    result["rsi14"] = 100 - (100 / (1 + rs))
+    
+    # ── 成交量分析 ────────────────────────────────────────────
+    result["ma_vol_5"] = result.get("volume", pd.Series(0, index=result.index)).rolling(window=5, min_periods=1).mean()
+    result["ma_vol_60"] = result.get("volume", pd.Series(0, index=result.index)).rolling(window=60, min_periods=1).mean()
+    result["vol_ratio"] = result.get("volume", pd.Series(0, index=result.index)) / result["ma_vol_5"].shift(1).replace(0, 1)
+    result["price_change"] = close.pct_change()
+    result["vol_match"] = (
+        ((result["price_change"] > 0) & (result["vol_ratio"] > 1.0)) |
+        ((result["price_change"] < 0) & (result["vol_ratio"] < 1.0))
+    )
+    
+    # ── 价格位置 ──────────────────────────────────────────────
+    rolling_high = close.rolling(window=60, min_periods=20).max()
+    rolling_low = close.rolling(window=60, min_periods=20).min()
+    result["price_pos_60d"] = (close - rolling_low) / (rolling_high - rolling_low).replace(0, 1) * 100
+    
+    # ── 偏离比例 ──────────────────────────────────────────────
+    result["close_pct_short"] = ((close / result["zx_short"]) - 1) * 100
+    result["close_pct_long"] = ((close / result["zx_long"]) - 1) * 100
+    result["short_pct_long"] = ((result["zx_short"] / result["zx_long"]) - 1) * 100
+    
+    # ── 三线位置 ──────────────────────────────────────────────
+    def _line_position(row):
+        c = row["close"]; s = row["zx_short"]; l = row["zx_long"]
+        if c > s > l: return "收盘>白线>黄线（三线多头）"
+        elif s > c > l: return "白线>收盘>黄线（偏弱反弹）"
+        elif c > l > s: return "收盘>黄线>白线（反弹整理）"
+        elif l > s > c: return "黄线>白线>收盘（空头排列）"
+        elif l > c > s: return "黄线>收盘>白线（弱势）"
+        elif s > l > c: return "白线>黄线>收盘（偏弱）"
+        else: return "三线纠缠"
+    result["line_position"] = result.apply(_line_position, axis=1)
+    
+    # ── 均线排列 ──────────────────────────────────────────────
+    def _ma_pattern(row):
+        if row.get("ma5",0) > row.get("ma10",0) > row.get("ma20",0) > row.get("ma60",0):
+            return "多头排列（强势上涨）"
+        elif row.get("ma5",0) < row.get("ma10",0) < row.get("ma20",0) < row.get("ma60",0):
+            return "空头排列（弱势下跌）"
+        elif row.get("ma5",0) > row.get("ma20",0) and row.get("ma10",0) > row.get("ma20",0):
+            return "偏多整理"
+        elif row.get("ma5",0) < row.get("ma20",0) and row.get("ma10",0) < row.get("ma20",0):
+            return "偏空整理"
+        else:
+            return "均线纠缠"
+    result["ma_pattern"] = result.apply(_ma_pattern, axis=1)
+    
+    return result
+
+
 # ── 信号生成 ─────────────────────────────────────────────────────────────────
 
 def detect_crossover(

@@ -1,0 +1,76 @@
+name: 持仓分析 + 选股推荐（全链路）
+
+on:
+  schedule:
+    # 工作日北京时间 16:00 (UTC 08:00) - 完整持仓分析 + 选股推荐
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch:             # 支持手动触发
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: LARK_APP
+    
+    env:
+      FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+      FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+      CODEBUDDY_API_KEY: ${{ secrets.CODEBUDDY_API_KEY }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖（清华镜像源）
+        run: |
+          pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+          pip install xalpha pandas numpy requests tushare akshare
+
+      - name: 数据源可用性检查
+        run: |
+          echo "=== 数据源连通性检查 ==="
+          python3 -c "
+          try:
+              import xalpha as xa
+              info = xa.indexinfo(code='SH000001')
+              print('✅ xalpha 连通正常')
+          except Exception as e:
+              print(f'⚠ xalpha 异常: {e}')
+          try:
+              import akshare as ak
+              print('✅ akshare 导入正常')
+          except Exception as e:
+              print(f'⚠ akshare 异常: {e}')
+          "
+
+      - name: 配置环境变量
+        run: |
+          cat > .env << EOF
+          TUSHARE_TOKEN=${TUSHARE_TOKEN}
+          FEISHU_WEBHOOK=${FEISHU_WEBHOOK}
+          CODEBUDDY_API_KEY=${CODEBUDDY_API_KEY}
+          EOF
+          echo "环境变量文件已创建"
+          echo "CODEBUDDY_API_KEY 存在: $(if [ -n '$CODEBUDDY_API_KEY' ]; then echo 'yes'; else echo 'no'; fi)"
+
+      - name: 执行持仓分析 + 选股推荐 + 飞书推送
+        run: |
+          echo "=== 全链路持仓分析 ==="
+          echo "FEISHU_APP_ID: $(if [ -n '$FEISHU_APP_ID' ]; then echo 'configured'; else echo 'NOT SET'; fi)"
+          echo "FEISHU_WEBHOOK: $(if [ -n '$FEISHU_WEBHOOK' ]; then echo 'configured'; else echo 'NOT SET'; fi)"
+          # 执行完整报告生成（持仓分析 + 选股推荐 + 飞书文档 + 飞书卡片 + LLM解读）
+          python -m market_monitor.report.portfolio_professional --feishu --selection --llm
+
+      - name: 上传报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-daily-${{ github.run_number }}
+          path: portfolio_report_*.md
+          retention-days: 30

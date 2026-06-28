@@ -38,17 +38,15 @@ from market_monitor.data_sources.hk_valuation import fetch_hk_valuation
 from market_monitor.data_sources.hk_tech_valuation import fetch_hk_tech_valuation
 from market_monitor.data_sources.shiller_api import fetch_us_cape_valuation
 
-# ── ETF指数映射表（从 etf_index_mapping.csv 加载）─────────────────────────────
-ETF_MAPPING = {
-    "159202": {"name": "恒生互联网ETF", "index": "HKHSIII", "index_name": "恒生互联网科技业指数"},
-    "159852": {"name": "软件ETF嘉实", "index": "ZZ930601", "index_name": "中证软件服务指数"},
-    "506008": {"name": "科创板长城", "index": "SH000688", "index_name": "科创50指数"},
-    "562500": {"name": "机器人ETF华夏", "index": "ZZH30590", "index_name": "中证机器人指数"},
-    "159217": {"name": "港股通创新药ETF", "index": "GZ987018", "index_name": "恒生医疗保健指数"},
-    "159869": {"name": "游戏ETF华夏", "index": "ZZ930901", "index_name": "中证游戏产业指数"},
-    "513180": {"name": "恒生科技ETF华夏", "index": "HKHSTECH", "index_name": "恒生科技指数"},
-    "513090": {"name": "香港证券ETF易方达", "index": "ZZ930709", "index_name": "中证香港证券指数"},
-}
+# 统一ETF映射（从唯一数据源导入）
+from market_monitor.data.etf_index_mapping import (
+    lookup_by_etf_code as _lookup_etf, is_unsupported_index,
+)
+
+# 知行趋势线（唯一指标计算源）— 替代本文件中所有重复计算
+from market_monitor.analysis.zhixing import compute_all_indicators as _compute_indicators
+from market_monitor.analysis.zhixing import get_trend_status as _get_trend_status
+from market_monitor.analysis.zhixing import comprehensive_score as _comprehensive_score
 
 # ── 数据获取 ──────────────────────────────────────────────────────────────────
 
@@ -81,75 +79,16 @@ def get_index_data(index_code_xalpha: str) -> pd.DataFrame:
 
 
 def calculate_technical(df: pd.DataFrame) -> pd.DataFrame:
-    """计算技术指标"""
-    if df.empty or len(df) < 60:
-        return df
+    """计算技术指标（调用 zhixing 统一入口，向后兼容包装器）"""
+    return _compute_indicators(df)
 
-    result = df.copy()
-    close = result["close"]
 
-    # 均线
-    result["ma5"] = close.rolling(window=5, min_periods=1).mean()
-    result["ma10"] = close.rolling(window=10, min_periods=1).mean()
-    result["ma14"] = close.rolling(window=14, min_periods=1).mean()
-    result["ma20"] = close.rolling(window=20, min_periods=1).mean()
-    result["ma28"] = close.rolling(window=28, min_periods=1).mean()
-    result["ma57"] = close.rolling(window=57, min_periods=1).mean()
-    result["ma60"] = close.rolling(window=60, min_periods=1).mean()
-    result["ma114"] = close.rolling(window=114, min_periods=1).mean()
-
-    # 知行趋势线
-    # 短线: EMA(EMA(close,10),10) - 10日EMA的双重平滑
-    ema10 = close.ewm(span=10, adjust=False).mean()
-    result["zx_short"] = ema10.ewm(span=10, adjust=False).mean()
-    # 长线: (MA14+MA28+MA57+MA114)/4 - 4条均线的平均
-    result["zx_long"] = (result["ma14"] + result["ma28"] + result["ma57"] + result["ma114"]) / 4
-
-    # KDJ
-    low14 = result["low"].rolling(window=9, min_periods=1).min()
-    high14 = result["high"].rolling(window=9, min_periods=1).max()
-    diff = (high14 - low14).replace(0, 0.001)
-    rsv = ((close - low14) / diff * 100).fillna(50)
-    result["kdj_k"] = rsv.ewm(alpha=1/3, adjust=False).mean()
-    result["kdj_d"] = result["kdj_k"].ewm(alpha=1/3, adjust=False).mean()
-    result["kdj_j"] = 3 * result["kdj_k"] - 2 * result["kdj_d"]
-
-    # MACD
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    result["macd_diff"] = ema12 - ema26
-    result["macd_dea"] = result["macd_diff"].ewm(span=9, adjust=False).mean()
-    result["macd_hist"] = (result["macd_diff"] - result["macd_dea"]) * 2
-
-    # RSI
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0)
-    loss = (-delta).where(delta < 0, 0)
-    avg_gain = gain.rolling(window=14, min_periods=1).mean()
-    avg_loss = loss.rolling(window=14, min_periods=1).mean()
-    rs = avg_gain / avg_loss.replace(0, 0.001)
-    result["rsi14"] = 100 - (100 / (1 + rs))
-
-    # 成交量
-    result["ma_vol_5"] = result["volume"].rolling(window=5, min_periods=1).mean()
-    result["ma_vol_60"] = result["volume"].rolling(window=60, min_periods=1).mean()
-    result["vol_ratio"] = result["volume"] / result["ma_vol_5"].shift(1).replace(0, 1)
-    result["price_change"] = close.pct_change()
-    result["vol_match"] = (
-        ((result["price_change"] > 0) & (result["vol_ratio"] > 1.0)) |
-        ((result["price_change"] < 0) & (result["vol_ratio"] < 1.0))
-    )
-
-    # 价格位置
-    rolling_high = close.rolling(window=60, min_periods=20).max()
-    rolling_low = close.rolling(window=60, min_periods=20).min()
-    result["price_pos_60d"] = (close - rolling_low) / (rolling_high - rolling_low).replace(0, 1) * 100
-
-    return result
-
+# ── 信号兼容映射（三级→五级） ─────────────────────────────────────────────────
+# 旧的 STRONG/WATCH/DANGER 统一到五级信号体系
+_SIGNAL_COMPAT = {"STRONG": "BUY", "WATCH": "HOLD_BULL", "DANGER": "HOLD_BEAR"}
 
 def analyze_etf(etf_code: str, etf_name: str, index_code: str, index_name: str) -> Dict:
-    """分析单只ETF"""
+    """分析单只ETF（使用 zhixing 统一指标计算和信号系统）"""
     print(f"  [{etf_code}] {etf_name} -> {index_name}")
 
     # 获取数据
@@ -157,7 +96,7 @@ def analyze_etf(etf_code: str, etf_name: str, index_code: str, index_name: str) 
     if df.empty:
         return None
 
-    # 计算技术指标
+    # 计算技术指标（zhixing 统一入口）
     df = calculate_technical(df)
     if len(df) < 60:
         return None
@@ -165,126 +104,61 @@ def analyze_etf(etf_code: str, etf_name: str, index_code: str, index_name: str) 
     latest = df.iloc[-1]
     prev = df.iloc[-2] if len(df) >= 2 else latest
 
+    # 使用 zhixing 五级信号体系
+    trend_status = _get_trend_status(df)
+    if "error" in trend_status:
+        return None
+    signal = trend_status["signal"]  # BUY/HOLD_BULL/HOLD_NEUTRAL/HOLD_BEAR/SELL
+    position = trend_status["position"]  # 多头排列/空头排列/纠缠整理
+
+    # 综合评分
+    score_result = _comprehensive_score(df)
+    pattern_score = score_result.get("total_score", 0)
+
     # 知行趋势线
-    short_trend = latest.get("zx_short", 0)   # EMA(EMA(close,10),10)
-    long_trend = latest.get("zx_long", 0)     # (MA14+MA28+MA57+MA114)/4
+    short_trend = latest.get("zx_short", 0)
+    long_trend = latest.get("zx_long", 0)
     close_price = latest.get("close", 0)
 
     # 前一天数据（用于计算偏离变化）
     prev_short = prev.get("zx_short", 0)
-    prev_long = prev.get("zx_long", 0)
     prev_close = prev.get("close", 0)
 
-    # 信号判断（按您的公式）
-    # 强势：短线 > 长线 且 收盘价 > 短线
-    # 观望：短线 > 长线 且 收盘价 < 短线
-    # 危险：短线 < 长线 或 收盘价 < 长线
-    if short_trend > long_trend and close_price > short_trend:
-        signal = "STRONG"       # 强势
-    elif short_trend > long_trend and close_price <= short_trend:
-        signal = "WATCH"        # 观望
-    else:
-        signal = "DANGER"       # 危险
+    # 偏离比例（从 DataFrame 直接取）
+    close_pct_short = latest.get("close_pct_short", 0) or ((close_price / short_trend) - 1) * 100 if short_trend else 0
+    close_pct_long = latest.get("close_pct_long", 0) or ((close_price / long_trend) - 1) * 100 if long_trend else 0
+    short_pct_long = latest.get("short_pct_long", 0) or ((short_trend / long_trend) - 1) * 100 if long_trend else 0
+    prev_close_pct = ((prev_close / prev_short) - 1) * 100 if prev_short else 0
+    close_deviation_change = close_pct_short - prev_close_pct
 
-    # 排列状态
-    if short_trend > long_trend:
-        position = "短线在长线之上"
-    else:
-        position = "短线在长线之下"
-
-    # 偏离比例计算
-    close_pct_short = ((close_price / short_trend) - 1) * 100 if short_trend != 0 else 0
-    close_pct_long = ((close_price / long_trend) - 1) * 100 if long_trend != 0 else 0
-    short_pct_long = ((short_trend / long_trend) - 1) * 100 if long_trend != 0 else 0
-
-    # 前一天偏离度（用于判断偏离变化）
-    prev_close_pct_short = ((prev_close / prev_short) - 1) * 100 if prev_short != 0 else 0
-    close_deviation_change = close_pct_short - prev_close_pct_short  # 正=偏离扩大，负=偏离缩小
-
-    # 三线位置关系（复合描述用）
-    if close_price > short_trend > long_trend:
-        line_position = "收盘>白线>黄线（三线多头）"
-    elif short_trend > close_price > long_trend:
-        line_position = "白线>收盘>黄线（偏弱反弹）"
-    elif close_price > long_trend > short_trend:
-        line_position = "收盘>黄线>白线（反弹整理）"
-    elif long_trend > short_trend > close_price:
-        line_position = "黄线>白线>收盘（空头排列）"
-    elif long_trend > close_price > short_trend:
-        line_position = "黄线>收盘>白线（弱势）"
-    elif short_trend > long_trend > close_price:
-        line_position = "白线>黄线>收盘（偏弱）"
-    else:
-        line_position = "三线纠缠"
-
-    # 均线排列判断
-    ma5 = latest.get("ma5", 0)
-    ma10 = latest.get("ma10", 0)
-    ma20 = latest.get("ma20", 0)
-    ma60 = latest.get("ma60", 0)
-    if ma5 > ma10 > ma20 > ma60:
-        ma_pattern = "多头排列（强势上涨）"
-    elif ma5 < ma10 < ma20 < ma60:
-        ma_pattern = "空头排列（弱势下跌）"
-    elif ma5 > ma20 and ma10 > ma20:
-        ma_pattern = "偏多整理"
-    elif ma5 < ma20 and ma10 < ma20:
-        ma_pattern = "偏空整理"
-    else:
-        ma_pattern = "均线纠缠"
+    # 三线位置 / 均线排列（从 DataFrame 直接取）
+    line_position = latest.get("line_position", "三线纠缠")
+    ma_pattern = latest.get("ma_pattern", "均线纠缠")
 
     # 异常量能
     abnormal = []
     price_pos = latest.get("price_pos_60d", 50)
     is_huge = latest.get("vol_ratio", 1) > 3
-
     if is_huge and price_pos < 30:
         abnormal.append({"type": "底部放巨量", "description": "低位出现巨量，可能预示反转", "severity": "positive"})
     if is_huge and price_pos > 70:
         price_change = latest.get("price_change", 0) * 100
         if price_change < 2:
             abnormal.append({"type": "顶部放量滞涨", "description": f"高位放量但涨幅仅{price_change:.2f}%", "severity": "warning"})
-    if latest.get("vol_match", False) == False and latest.get("vol_ratio", 1) > 1.2:
+    if not latest.get("vol_match", False) and latest.get("vol_ratio", 1) > 1.2:
         if price_pos > 60 and latest.get("price_change", 0) > 0:
             abnormal.append({"type": "顶背离", "description": "价涨量缩，上涨动力不足", "severity": "warning"})
         elif price_pos < 40 and latest.get("price_change", 0) < 0:
             abnormal.append({"type": "底背离", "description": "价跌量缩，可能企稳", "severity": "positive"})
-
-    # 评分（基于知行信号）
-    score = 0
-    if signal == "STRONG":
-        score += 50
-    elif signal == "WATCH":
-        score += 25
-    else:  # DANGER
-        score += 0
-
-    # 均线辅助评分
-    if latest.get("close", 0) > latest.get("ma20", 0):
-        score += 10
-    if latest.get("close", 0) > latest.get("ma60", 0):
-        score += 10
-
-    if latest.get("vol_match", False):
-        score += 20
-    elif latest.get("vol_ratio", 1) > 1.5:
-        score += 10
-
-    # RSI 辅助评分
-    rsi = latest.get("rsi14", 50)
-    if rsi < 30:
-        score += 10  # 超卖可能反弹
-    elif rsi > 80:
-        score -= 10  # 超买注意风险
 
     return {
         "etf_code": etf_code,
         "etf_name": etf_name,
         "index_code": index_code,
         "index_name": index_name,
-        "close": latest.get("close", 0),
-        "zx_short": latest.get("zx_short", 0),
-        "zx_long": latest.get("zx_long", 0),
+        "close": close_price,
+        "zx_short": short_trend,
+        "zx_long": long_trend,
         "ma5": latest.get("ma5", 0),
         "ma10": latest.get("ma10", 0),
         "ma14": latest.get("ma14", 0),
@@ -299,23 +173,19 @@ def analyze_etf(etf_code: str, etf_name: str, index_code: str, index_name: str) 
         "macd_diff": latest.get("macd_diff", 0),
         "macd_dea": latest.get("macd_dea", 0),
         "macd_hist": latest.get("macd_hist", 0),
-        "rsi14": rsi,
+        "rsi14": latest.get("rsi14", 50),
         "vol_ratio": latest.get("vol_ratio", 1),
         "vol_match": latest.get("vol_match", False),
         "price_pos_60d": price_pos,
         "signal": signal,
         "position": position,
-        "pattern_score": score,
+        "pattern_score": pattern_score,
         "abnormal_signals": abnormal,
-        # 偏离比例
         "close_pct_short": close_pct_short,
         "close_pct_long": close_pct_long,
         "short_pct_long": short_pct_long,
-        # 偏离变化
         "close_deviation_change": close_deviation_change,
-        # 三线位置
         "line_position": line_position,
-        # 均线排列
         "ma_pattern": ma_pattern,
     }
 
@@ -406,11 +276,11 @@ class ProfessionalETFReportGenerator:
         close = r.get('close', 0)
         
         if zx_short > zx_long and close > zx_short:
-            return "🟢强势", "白>黄，收在白线上"
+            return "🟢金叉多头", "白>黄，收在白线上"
         elif zx_short > zx_long and close <= zx_short:
-            return "🟡观望", "白>黄，收在白线下"
+            return "🟡偏弱多头", "白>黄，收在白线下"
         else:
-            return "🔴危险", "白<黄，空头排列"
+            return "🔴空头排列", "白<黄"
 
     def _kdj_status(self, r: dict):
         """KDJ状态"""
@@ -430,11 +300,11 @@ class ProfessionalETFReportGenerator:
         sig = r.get('signal', '')
         rsi = r.get('rsi14', 50)
         
-        if sig == 'STRONG':
+        if sig == 'BUY':
             if rsi > 70: return "持有/减仓"
             elif rsi < 30: return "加仓机会"
             return "持有"
-        elif sig == 'WATCH':
+        elif sig == 'HOLD_BULL':
             if rsi < 30: return "关注"
             return "观望"
         else:
@@ -585,14 +455,14 @@ class ProfessionalETFReportGenerator:
             current_cash_ratio = 0  # 假设无现金，若有需单独计算
 
             # 根据持仓分布估算趋势信号
-            strong_count = sum(1 for r in self.results if r.get('signal') == 'STRONG')
-            watch_count = sum(1 for r in self.results if r.get('signal') == 'WATCH')
-            danger_count = sum(1 for r in self.results if r.get('signal') == 'DANGER')
+            buy_count = sum(1 for r in self.results if r.get('signal') == 'BUY')
+            bull_count = sum(1 for r in self.results if r.get('signal') == 'HOLD_BULL')
+            bear_count = sum(1 for r in self.results if r.get('signal') == 'HOLD_BEAR')
 
             # 整体趋势判断
-            if danger_count >= len(self.results) * 0.6:
+            if bear_count >= len(self.results) * 0.6:
                 overall_trend = "bearish"
-            elif strong_count >= len(self.results) * 0.4:
+            elif buy_count >= len(self.results) * 0.4:
                 overall_trend = "bullish"
             else:
                 overall_trend = "neutral"
@@ -669,9 +539,9 @@ class ProfessionalETFReportGenerator:
                 "current_a_ratio": current_a_ratio,
                 "current_us_ratio": current_us_ratio,
                 "signal_distribution": {
-                    "strong": strong_count,
-                    "watch": watch_count,
-                    "danger": danger_count,
+                    "buy": buy_count,
+                    "bull": bull_count,
+                    "bear": bear_count,
                 },
                 "overall_trend": overall_trend,
             }
@@ -700,7 +570,7 @@ class ProfessionalETFReportGenerator:
         try:
             from market_monitor.data_sources.etf_selector import get_selection_etfs
             from market_monitor.analysis.zhixing import fetch_index_history_xalpha, get_trend_status, comprehensive_score
-            from market_monitor.portfolio_selection_workflow import ETF_INDEX_TO_XACODE
+            from market_monitor.data.etf_index_mapping import lookup_by_index_name
             
             # Phase 1: 初筛
             result1 = get_selection_etfs(scale_min=5000)
@@ -715,7 +585,7 @@ class ProfessionalETFReportGenerator:
             analyses = []
             for etf in new_etfs[:10]:
                 track = etf.get('track_target', '')
-                xa_code = ETF_INDEX_TO_XACODE.get(track)
+                xa_code = lookup_by_index_name(track)
                 if not xa_code:
                     continue
                 
@@ -829,6 +699,86 @@ class ProfessionalETFReportGenerator:
         
         self._selection_cache = result
         return result
+
+    def _generate_history_section(self) -> str:
+        """生成历史对比章节（本周vs上周信号变化）。"""
+        try:
+            from market_monitor.data.portfolio_db import get_db
+            db = get_db()
+            changes = db.get_signal_changes(self.report_date)
+            
+            if not changes:
+                return ""
+            
+            lines = ["", "<h1>三.2、信号变化（vs上期）</h1>", "",
+                     "<table>", "<thead><tr><th>ETF</th><th>上期信号</th><th>本期信号</th><th>评分变化</th></tr></thead>",
+                     "<tbody>"]
+            
+            for c in changes:
+                prev = c['prev_signal']
+                curr = c['curr_signal']
+                direction = "📈" if c['score_change'] > 0 else "📉" if c['score_change'] < 0 else "➖"
+                lines.append(
+                    f"<tr><td>{self._escape(c['etf_name'])}</td>"
+                    f"<td>{prev}</td><td><b>{curr}</b></td>"
+                    f"<td>{direction} {c['score_change']:+.0f}</td></tr>"
+                )
+            
+            lines.append("</tbody></table>")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+    
+    def _generate_portfolio_analysis_section(self) -> str:
+        """生成组合分析章节（板块集中度+权重分布）。"""
+        try:
+            from market_monitor.analysis.portfolio_analyzer import PortfolioAnalyzer
+            analyzer = PortfolioAnalyzer(self.results)
+            summary = analyzer.summary()
+            
+            lines = ["", "<h1>三.3、组合分析</h1>"]
+            
+            # 板块集中度
+            sector = summary.get("sector_concentration", {})
+            if sector:
+                lines.append("<h2>板块集中度</h2>")
+                lines.append("<table><thead><tr><th>板块</th><th>数量</th><th>权重</th></tr></thead><tbody>")
+                for name, info in sector.items():
+                    lines.append(f"<tr><td>{name}</td><td>{info['count']}只</td><td>{info['weight']:.1f}%</td></tr>")
+                lines.append("</tbody></table>")
+            
+            # 市场权重分布
+            wd = summary.get("weight_distribution", {})
+            if wd:
+                lines.append("<h2>市场权重分布</h2>")
+                lines.append("<table><thead><tr><th>市场</th><th>占比</th></tr></thead><tbody>")
+                for market, pct in wd.items():
+                    lines.append(f"<tr><td>{market}</td><td>{pct}%</td></tr>")
+                lines.append("</tbody></table>")
+            
+            return "\n".join(lines)
+        except Exception:
+            return ""
+    
+    def _generate_tracking_section(self) -> str:
+        """生成选股追踪统计章节。"""
+        try:
+            from market_monitor.report.selection_tracker import SelectionTracker
+            tracker = SelectionTracker()
+            stats = tracker.get_tracking_stats()
+            
+            if stats.get("total_checked", 0) == 0:
+                return ""
+            
+            lines = ["", "<h1>七、选股追踪统计</h1>", "",
+                     "<table><thead><tr><th>指标</th><th>数值</th></tr></thead><tbody>",
+                     f"<tr><td>累计检查</td><td>{stats['total_checked']} 条</td></tr>",
+                     f"<tr><td>命中率</td><td>{stats['hit_rate']:.0f}% ({stats['hits']}/{stats['total_checked']})</td></tr>",
+                     f"<tr><td>平均7日收益</td><td>{stats['avg_return_7d']:+.2f}%</td></tr>",
+                     "</tbody></table>"]
+            return "\n".join(lines)
+        except Exception:
+            return ""
 
     def _build_pm_xml_block(self, pm_result: dict, style: str = "market") -> str:
         """
@@ -1128,14 +1078,16 @@ class ProfessionalETFReportGenerator:
         total = len(self.results)
         avg_score = sum(r.get('pattern_score', 0) for r in self.results) / total if total else 0
 
-        strong = [r for r in self.results if r.get('signal') == 'STRONG']
-        watch = [r for r in self.results if r.get('signal') == 'WATCH']
-        danger = [r for r in self.results if r.get('signal') == 'DANGER']
+        buy_list = [r for r in self.results if r.get('signal') == 'BUY']
+        bull_list = [r for r in self.results if r.get('signal') == 'HOLD_BULL']
+        neutral_list = [r for r in self.results if r.get('signal') == 'HOLD_NEUTRAL']
+        bear_list = [r for r in self.results if r.get('signal') == 'HOLD_BEAR']
 
-        strong_count, watch_count, danger_count = len(strong), len(watch), len(danger)
-        strong_pct = strong_count / total * 100 if total else 0
-        watch_pct = watch_count / total * 100 if total else 0
-        danger_pct = danger_count / total * 100 if total else 0
+        buy_count, bull_count, neutral_count, bear_count = len(buy_list), len(bull_list), len(neutral_list), len(bear_list)
+        buy_pct = buy_count / total * 100 if total else 0
+        bull_pct = bull_count / total * 100 if total else 0
+        neutral_pct = neutral_count / total * 100 if total else 0
+        bear_pct = bear_count / total * 100 if total else 0
 
         # 计算整体盈亏
         total_profit = sum(r.get('profit_pct', 0) for r in self.results) / total if total else 0
@@ -1147,7 +1099,7 @@ class ProfessionalETFReportGenerator:
         health = "优秀" if avg_score >= 70 else "良好" if avg_score >= 50 else "一般" if avg_score >= 30 else "较差"
         health_emoji = "🟢" if avg_score >= 50 else "🟡" if avg_score >= 30 else "🔴"
         
-        status = "整体偏弱" if danger_count > strong_count else "整体偏强" if strong_count > danger_count else "分化明显"
+        status = "整体偏弱" if bear_count > buy_count else "整体偏强" if buy_count > bear_count else "分化明显"
 
         # 计算总盈亏
         total_market_value = sum(r.get('market_value', 0) for r in self.results)
@@ -1160,7 +1112,7 @@ class ProfessionalETFReportGenerator:
         position_rows = ""
         for r in sorted_results:
             sig = r.get('signal', '')
-            sig_emoji = {"STRONG": "🟢", "WATCH": "🟡", "DANGER": "🔴"}.get(sig, "⚪")
+            sig_emoji = {"BUY": "🟢", "HOLD_BULL": "🟡", "HOLD_NEUTRAL": "⚪", "HOLD_BEAR": "🔴", "SELL": "🛑"}.get(sig, "⚪")
             
             zx_emoji, zx_desc = self._zx_signal(r)
             rsi_str, rsi_status = self._rsi_status(r.get('rsi14', 50))
@@ -1188,8 +1140,8 @@ class ProfessionalETFReportGenerator:
 
         # 风险评估
         risk_items = []
-        if danger_count > total // 2:
-            risk_items.append(f"多数标的处于危险信号（{danger_count}只，{danger_pct:.0f}%）")
+        if bear_count > total // 2:
+            risk_items.append(f"多数标的处于空头信号（{bear_count}只，{bear_pct:.0f}%）")
         if avg_score < 40:
             risk_items.append("整体评分偏低，技术面偏弱")
         if any(r.get('rsi14', 0) > 70 for r in self.results):
@@ -1201,15 +1153,15 @@ class ProfessionalETFReportGenerator:
 
         # 操作建议
         advice_items = []
-        if strong:
-            strong_names = "、".join([r.get('index_name', '')[:6] for r in strong[:3]])
-            advice_items.append(f"强势标的：{strong_names}")
-        if watch:
-            watch_names = "、".join([r.get('index_name', '')[:6] for r in watch[:2]])
-            advice_items.append(f"观望标的：{watch_names}")
-        if danger:
-            danger_names = "、".join([r.get('index_name', '')[:6] for r in danger[:3]])
-            advice_items.append(f"危险标的：{danger_names}")
+        if buy_list:
+            buy_names = "、".join([r.get('index_name', '')[:6] for r in buy_list[:3]])
+            advice_items.append(f"金叉买入：{buy_names}")
+        if bull_list:
+            bull_names = "、".join([r.get('index_name', '')[:6] for r in bull_list[:2]])
+            advice_items.append(f"多头持有：{bull_names}")
+        if bear_list:
+            bear_names = "、".join([r.get('index_name', '')[:6] for r in bear_list[:3]])
+            advice_items.append(f"空头排列：{bear_names}")
         
         advice_content = "<ul>" + "".join([f"<li>{item}</li>" for item in advice_items]) + "</ul>" if advice_items else "<p>暂无明确操作建议</p>"
 
@@ -1219,6 +1171,15 @@ class ProfessionalETFReportGenerator:
 
         # 选股推荐（可选）
         selection_section = self._generate_selection_section()
+
+        # 历史对比
+        history_section = self._generate_history_section()
+
+        # 组合分析
+        portfolio_analysis_section = self._generate_portfolio_analysis_section()
+
+        # 选股追踪统计
+        tracking_section = self._generate_tracking_section()
 
         # 生成XML
         xml = f"""<title>ETF持仓分析报告 {self.report_date}</title>
@@ -1235,13 +1196,14 @@ class ProfessionalETFReportGenerator:
   </tbody>
 </table>
 
-<h2>信号分布</h2>
+<h2>信号分布（五级知行信号）</h2>
 <table>
   <thead><tr><th>信号</th><th>数量</th><th>占比</th></tr></thead>
   <tbody>
-    <tr><td>🟢 强势</td><td>{strong_count} 只</td><td>{strong_pct:.0f}%</td></tr>
-    <tr><td>🟡 观望</td><td>{watch_count} 只</td><td>{watch_pct:.0f}%</td></tr>
-    <tr><td>🔴 危险</td><td>{danger_count} 只</td><td>{danger_pct:.0f}%</td></tr>
+    <tr><td>🟢 金叉买入 (BUY)</td><td>{buy_count} 只</td><td>{buy_pct:.0f}%</td></tr>
+    <tr><td>🟡 多头持有 (HOLD_BULL)</td><td>{bull_count} 只</td><td>{bull_pct:.0f}%</td></tr>
+    <tr><td>⚪ 中性观望 (HOLD_NEUTRAL)</td><td>{neutral_count} 只</td><td>{neutral_pct:.0f}%</td></tr>
+    <tr><td>🔴 空头持有 (HOLD_BEAR)</td><td>{bear_count} 只</td><td>{bear_pct:.0f}%</td></tr>
   </tbody>
 </table>
 
@@ -1264,16 +1226,29 @@ class ProfessionalETFReportGenerator:
 <h1>三、操作建议</h1>
 {advice_content}
 
+{history_section}
+
+{portfolio_analysis_section}
+
 <h1>四、风险提示</h1>
 <p>{risk_content}</p>
 {pm_block}
 {selection_section}
+{tracking_section}
 
 <callout emoji="⚠️" background-color="light-yellow" border-color="yellow">
   <p>本报告仅供参考，不构成投资建议。市场有风险，投资需谨慎。</p>
 </callout>
 
 <p>报告时间：{self.report_time} 北京时间</p>"""
+
+        # 异步保存快照到 SQLite（不阻塞报告生成）
+        try:
+            from market_monitor.data.portfolio_db import get_db
+            db = get_db()
+            db.save_snapshot(self.report_date, self.results)
+        except Exception:
+            pass
 
         return xml
 
@@ -1365,40 +1340,41 @@ class ProfessionalETFReportGenerator:
         return doc_id, doc_url
 
     def build_feishu_card(self, doc_url: str = None) -> dict:
-        """构建飞书卡片消息 - 按知行信号分类"""
+        """构建飞书卡片消息 - 按五级知行信号分类"""
         # 分类
-        strong = [r for r in self.results if r.get('signal') == 'STRONG']
-        watch = [r for r in self.results if r.get('signal') == 'WATCH']
-        danger = [r for r in self.results if r.get('signal') == 'DANGER']
+        buy_list = [r for r in self.results if r.get('signal') == 'BUY']
+        bull_list = [r for r in self.results if r.get('signal') == 'HOLD_BULL']
+        neutral_list = [r for r in self.results if r.get('signal') == 'HOLD_NEUTRAL']
+        bear_list = [r for r in self.results if r.get('signal') == 'HOLD_BEAR']
         
         # 构建消息内容
         content_lines = []
-        content_lines.append(f"**持仓概览** | {len(self.results)}只ETF | 🟢强势{len(strong)} | 🟡观望{len(watch)} | 🔴危险{len(danger)}")
+        content_lines.append(f"**持仓概览** | {len(self.results)}只ETF | 🟢金叉{len(buy_list)} | 🟡多头{len(bull_list)} | ⚪中性{len(neutral_list)} | 🔴空头{len(bear_list)}")
         content_lines.append("")
         
-        # 🟢 强势
-        if strong:
-            content_lines.append("**🟢 知行强势（白>黄，收在白线上）**")
-            for r in strong:
+        # 🟢 金叉买入
+        if buy_list:
+            content_lines.append("**🟢 金叉买入（短期上穿长期）**")
+            for r in buy_list:
                 rsi = r.get('rsi14', 50)
                 rsi_status = "超买" if rsi > 70 else ("超卖" if rsi < 30 else "中性")
                 content_lines.append(f"• {r.get('etf_name', '')} | RSI={rsi:.0f} {rsi_status}")
             content_lines.append("")
         
-        # 🟡 观望
-        if watch:
-            content_lines.append("**🟡 知行观望（白>黄，收在白线下）**")
-            for r in watch:
+        # 🟡 多头持有
+        if bull_list:
+            content_lines.append("**🟡 多头持有（短期>长期，收在线下）**")
+            for r in bull_list:
                 rsi = r.get('rsi14', 50)
                 pos = r.get('price_pos_60d', 50)
                 pos_status = "低位" if pos < 30 else ("高位" if pos > 70 else "中性")
                 content_lines.append(f"• {r.get('etf_name', '')} | RSI={rsi:.0f} | {pos_status}")
             content_lines.append("")
         
-        # 🔴 危险
-        if danger:
-            content_lines.append("**🔴 知行危险（白<黄，空头排列）**")
-            for r in danger:
+        # 🔴 空头持有
+        if bear_list:
+            content_lines.append("**🔴 空头持有（短期<长期）**")
+            for r in bear_list:
                 pos = r.get('price_pos_60d', 50)
                 pos_status = "低位" if pos < 30 else ("高位" if pos > 70 else "中性")
                 content_lines.append(f"• {r.get('etf_name', '')} | {pos_status}")
@@ -1418,6 +1394,34 @@ class ProfessionalETFReportGenerator:
             if pm_block:
                 elements.append({'tag': 'hr'})
                 elements.append({'tag': 'div', 'text': {'tag': 'lark_md', 'content': pm_block}})
+        
+        # ── 信号变化速览 ────────────────────────────────────────────────────────
+        try:
+            from market_monitor.data.portfolio_db import get_db
+            db = get_db()
+            changes = db.get_signal_changes(self.report_date)
+            if changes:
+                ch_lines = ["**📈 信号变化（vs上期）**", ""]
+                for c in changes[:5]:
+                    ch_lines.append(
+                        f"• {c['etf_name']}: {c['prev_signal']} → **{c['curr_signal']}** "
+                        f"({c['score_change']:+.0f})"
+                    )
+                elements.append({'tag': 'hr'})
+                elements.append({'tag': 'div', 'text': {'tag': 'lark_md', 'content': '\n'.join(ch_lines)}})
+        except Exception:
+            pass
+        
+        # ── 选股追踪 ──────────────────────────────────────────────────────────────
+        try:
+            from market_monitor.report.selection_tracker import SelectionTracker
+            tracker = SelectionTracker()
+            tracking_text = tracker.get_tracking_summary_text()
+            if tracking_text and "暂无" not in tracking_text:
+                elements.append({'tag': 'hr'})
+                elements.append({'tag': 'div', 'text': {'tag': 'lark_md', 'content': tracking_text}})
+        except Exception:
+            pass
         
         # 添加文档链接按钮
         if doc_url:
@@ -1489,6 +1493,8 @@ def main():
     parser.add_argument("--positions", "-p", default="market_monitor/positions.json", help="持仓文件路径")
     parser.add_argument("--selection", "-S", action="store_true", 
                         help="启用选股推荐模块（嵌入选股候选到持仓报告中）")
+    parser.add_argument("--llm", "-l", action="store_true",
+                        help="启用 LLM 自然语言解读（需 CODEBUDDY_API_KEY）")
     parser.add_argument("--pm-style", "-s", 
                         choices=["compact", "market", "action", "all"],
                         default="action",
@@ -1509,8 +1515,8 @@ def main():
         print(f"❌ 持仓文件不存在: {positions_path}")
         return
 
-    # 获取ETF代码列表
-    etf_codes = [p.get('code', '') for p in positions if p.get('code', '') in ETF_MAPPING]
+    # 获取ETF代码列表（从统一映射模块查询）
+    etf_codes = [p.get('code', '') for p in positions if _lookup_etf(p.get('code', ''))]
     
     # 通过Tushare获取实时价格
     print("📡 通过Tushare获取实时价格...")
@@ -1523,12 +1529,12 @@ def main():
         code = p.get('code', '')
         name = p.get('name', '')
 
-        if code in ETF_MAPPING:
-            mapping = ETF_MAPPING[code]
+        mapping = _lookup_etf(code)
+        if mapping:
             result = analyze_etf(
                 etf_code=code,
                 etf_name=name or mapping['name'],
-                index_code=mapping['index'],
+                index_code=mapping['xa_code'],
                 index_name=mapping['index_name'],
             )
             if result:
@@ -1622,6 +1628,21 @@ def main():
     if args.feishu:
         print()
         generator.send_to_feishu(doc_url)
+
+    # LLM 解读（可选）
+    if args.llm and results:
+        print("\n💡 生成 LLM 自然语言解读...")
+        from market_monitor.report.llm_interpreter import generate_interpretation
+        interpretation = generate_interpretation(results, date=generator.report_date)
+        if interpretation:
+            print(interpretation[:500])
+            # 保存解读到文件
+            interp_path = f"llm_interpretation_{generator.report_date}.md"
+            with open(interp_path, 'w') as f:
+                f.write(interpretation)
+            print(f"  已保存至 {interp_path}")
+        else:
+            print("  ⚠ LLM 解读生成失败（可能未配置 CODEBUDDY_API_KEY）")
 
     print(f"\n{'='*60}\n")
 

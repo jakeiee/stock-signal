@@ -31,6 +31,9 @@ feishu_professional_report.xml
 portfolio_report_*.md
 dividend_report.md
 
+### SQLite历史数据库（不提交） ###
+*.db
+
 ### 截图和图表（不提交） ###
 *.png
 

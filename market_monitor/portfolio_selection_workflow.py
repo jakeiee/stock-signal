@@ -62,73 +62,9 @@ BUY_SCORE_THRESHOLD = 40
 # 最多分析ETF数量（每只间隔1~2s，50只约需2~3分钟）
 MAX_ANALYZE_COUNT = 50
 
-# ── ETF 跟踪指数 → xalpha 指数代码映射 ──────────────────────────────────────────
-# 键：东方财富选股API返回的 INDEX_NAME_ABBR（跟踪标的简称）
-# 值：xalpha indexinfo 可用的指数代码
-# 
-# xalpha 代码格式：
-#   A股中证: ZZ+代码（如 ZZ930601）
-#   港股: HK+代码（如 HKHSTECH, HKHSIII）
-#   深证: SZ+代码（如 SZ399673）
-#   上证: SH+代码（如 SH000688）
-#   国证: GZ+代码（如 GZ987018）
-
-ETF_INDEX_TO_XACODE: Dict[str, str] = {
-    # ── 宽基指数 ──
-    "创业板50": "SZ399673",
-    "创业板人工智能": "ZZH20034",
-    
-    # ── 行业主题 ──
-    "CS物联网": "ZZ930712",
-    "SHS物联网": "ZZ931460",
-    "电力指数": "ZZ399989",
-    "绿色电力": "ZZH20033",
-    "消费电子": "ZZ931494",
-    "家电龙头": "ZZ931102",
-    "全指公用": "ZZ000990",
-    "中证VR": "ZZ930821",
-    "中国互联网50人民币": "HKHSIII",
-    "国新港股通央企红利": "ZZ931854",
-    
-    # ── 港股/外盘ETF ──
-    "港股通互联网": "HKHSIII",
-    "恒生港股通中国科技指数": "HKHSTECH",
-    "恒生港股通科技主题指数": "HKHSTECH",
-    "港股通科技主题": "HKHSTECH",
-    "港股通信息C人民币": "HKHSIII",
-    "港股通信息C港元": "HKHSIII",
-    
-    # ── 价值/红利/银行（2026-06-21 新增） ──
-    "中证红利": "ZZ000922",
-    "中证煤炭": "ZZ399998",
-    "中证银行": "ZZ399986",
-    "国企红利": "ZZ000824",
-    "上国红利": "ZZH50040",
-    "180价值": "SH000029",
-    "300价值": "SH000919",
-    "300价值稳健": "ZZ931586",
-    "300红利": "SH000821",
-    "300红利低波": "ZZ930740",
-    "800红利低波": "ZZ931848",
-    "800能源": "ZZ000928",
-    "A500红利低波": "ZZ931689",
-    "大盘价值": "SZ399373",
-    "价值100": "ZZ931468",
-    "全指能源": "SH000986",
-    "红利指数": "SH000015",
-    "港股通消费": "HKHSCCI",
-    "港股通消费港元": "HKHSIII",
-    "恒生国企指数": "HKHSCEI",
-    "恒生中国(香港上市)30指数": "HKHSI",
-    "S&P Oil & Gas Exploration & Production Select Industry": "SPOG",
-    
-    # ── 以下港股红利类指数 xalpha 不支持，跳过 ──
-    # 港股通红利低波、港股通高股息港元、恒生中国央企指数、
-    # 恒生港股通中国内地企业高股息率指数、恒生港股通高股息低波动指数、
-    # 恒生港股通高股息率指数
-    
-    # ── MSCI USA 等海外指数 xalpha 不支持，跳过 ──
-}
+# ── ETF 跟踪指数 → xalpha 指数代码映射（从统一模块导入）───────────────────────
+from market_monitor.data.etf_index_mapping import INDEX_NAME_TO_XACODE as ETF_INDEX_TO_XACODE
+from market_monitor.data.etf_index_mapping import is_unsupported_index
 
 # 止损规则（复用 PositionManager 默认规则）
 # 亏损5% → 预警观察
